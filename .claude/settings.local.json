@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(streamlit run*)",
+      "Bash(source venv/bin/activate*)",
+      "Bash(open -a \"Google Chrome\"*)"
+    ]
+  }
+}
