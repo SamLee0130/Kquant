@@ -7,8 +7,8 @@
 import pandas as pd
 import numpy as np
 import yfinance as yf
-from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Tuple
+from dataclasses import dataclass
+from typing import Dict, List, Optional
 from datetime import datetime, timedelta
 import logging
 
