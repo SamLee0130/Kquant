@@ -455,20 +455,27 @@ class PortfolioBacktester:
         years: int = 10
     ) -> BacktestResult:
         """백테스트 실행
-        
+
         Args:
-            start_date: 시작일 (없으면 end_date에서 years년 전)
-            end_date: 종료일 (없으면 오늘)
+            start_date: 시작일 (없으면 N년 전 1월 1일)
+            end_date: 종료일 (없으면 현재 기준 가장 최근 분기 시작일)
             years: 백테스팅 기간 (start_date가 없을 때 사용)
-            
+
         Returns:
             백테스트 결과
         """
         # 날짜 설정
+        now = datetime.now()
+
         if end_date is None:
-            end_date = datetime.now()
+            # 현재 날짜 기준 가장 최근 분기 시작일 (1월, 4월, 7월, 10월 1일)
+            current_quarter_month = ((now.month - 1) // 3) * 3 + 1
+            end_date = datetime(now.year, current_quarter_month, 1)
+
         if start_date is None:
-            start_date = end_date - timedelta(days=years * 365)
+            # N년 전 1월 1일
+            start_year = end_date.year - years
+            start_date = datetime(start_year, 1, 1)
 
         # 타임존 혼합 방지: tz-naive로 통일
         start_date = pd.Timestamp(start_date)
