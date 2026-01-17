@@ -2,10 +2,20 @@
 
 ETF 포트폴리오 백테스트 대시보드 - 한국 세금 규정을 반영한 투자 전략 시뮬레이션 도구
 
+## 핵심 기능
+
+- **자산 배분 백테스트**: ETF 포트폴리오의 과거 성과 시뮬레이션
+- **포트폴리오 비교**: 최대 3개 자산 배분 전략 간 성과 비교
+- **세금 계산**: 배당소득세(15%), 양도소득세(22%) 반영
+- **리밸런싱**: 분기별/연간 리밸런싱 시뮬레이션
+- **인출 시뮬레이션**: 은퇴 후 인출 전략 테스트
+
 ## 명령어
 
 ```bash
 # 환경 설정
+git clone https://github.com/SamLee0130/Kquant.git
+cd Kquant
 python -m venv venv
 source venv/bin/activate         # Windows: venv\Scripts\activate
 pip install -r requirements.txt
@@ -96,7 +106,14 @@ Kquant/
 | 양도소득세 | 22% |
 | 양도차익 공제 | $2,000 |
 | 거래비용 | 0.2% |
-| 기본 포트폴리오 | SPY 60%, QQQ 30%, BIL 10% |
+
+### 기본 포트폴리오
+
+| ETF | 배분 | 설명 |
+|-----|------|------|
+| SPY | 60% | S&P 500 Index |
+| QQQ | 30% | Nasdaq 100 Index |
+| BIL | 10% | 단기 국채 |
 
 ## 데이터 흐름
 
@@ -111,3 +128,16 @@ Kquant/
 - 함수/변수: snake_case (`calculate_cagr`, `dividend_tax_rate`)
 - 타입 힌트 사용
 - 한글 주석 허용 (UI 문자열은 한글)
+
+## Git 컨벤션
+
+- PR 설명(description)은 한국어로 작성
+- 커밋 메시지는 영어 또는 한국어 허용
+
+## 면책조항
+
+이 도구는 교육 및 연구 목적으로 제작되었습니다. 실제 투자 결정에는 신중을 기하시기 바라며, 투자로 인한 손실에 대해서는 책임지지 않습니다.
+
+## 라이선스
+
+MIT
