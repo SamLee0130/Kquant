@@ -1,0 +1,24 @@
+# Kquant 프로젝트 환경변수 설정 템플릿
+# 이 파일을 .env로 복사하고 실제 값들을 입력하세요
+
+# Alpha Vantage API Key (주식 데이터)
+# https://www.alphavantage.co/support/#api-key 에서 무료 키 발급 가능
+ALPHA_VANTAGE_API_KEY=your_alpha_vantage_api_key_here
+
+# Polygon.io API Key (고급 주식/암호화폐 데이터)
+# https://polygon.io/ 에서 키 발급 가능
+POLYGON_API_KEY=your_polygon_api_key_here
+
+# 업비트 API 설정 (암호화폐 데이터)
+UPBIT_ACCESS_KEY=your_upbit_access_key_here
+UPBIT_SECRET_KEY=your_upbit_secret_key_here
+
+# 한국투자증권 API 설정 (실제 거래용 - 선택적)
+KIS_APP_KEY=your_kis_app_key_here
+KIS_SECRET_KEY=your_kis_secret_key_here
+
+# 데이터베이스 설정
+DATABASE_URL=sqlite:///data/kquant.db
+
+# 로그 레벨 설정
+LOG_LEVEL=INFO

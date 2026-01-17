@@ -1,0 +1,32 @@
+# 데이터 처리
+pandas>=2.2.0
+numpy>=1.26.0
+
+# 웹 대시보드
+streamlit>=1.35.0
+
+# 데이터 수집
+requests>=2.31.0
+yfinance>=0.2.25
+beautifulsoup4>=4.12.2
+
+# 시각화
+matplotlib>=3.8.0
+plotly>=5.17.0
+seaborn>=0.13.0
+
+# 기술분석
+ta>=0.10.2
+
+# 환경설정
+python-dotenv>=1.0.0
+
+# 웹 스크래핑 지원
+lxml>=4.9.3
+html5lib>=1.1
+
+# 백테스트 라이브러리 (선택적)
+backtrader>=1.9.78
+
+# 암호화폐 API (선택적)
+ccxt>=4.2.0
