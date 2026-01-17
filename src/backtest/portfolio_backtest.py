@@ -737,16 +737,28 @@ class PortfolioBacktester:
                 capital_tax_payment_by_year[payment_year] = capital_tax_payment_by_year.get(payment_year, 0.0) + event.tax_amount
 
         annual_data = []
-        years = history_df['year'].unique()
-        
-        for year in sorted(years):
+        years = sorted(history_df['year'].unique())
+        prev_year_end_value = None
+
+        for year in years:
             year_data = history_df[history_df['year'] == year]
-            
-            if len(year_data) < 2:
+
+            if len(year_data) < 1:
                 continue
-            
-            start_value = year_data['total_value'].iloc[0]
-            end_value = year_data['total_value'].iloc[-1]
+
+            # 시작값: 해당 연도 첫 스냅샷 또는 이전 연도 종료값 사용
+            if len(year_data) >= 2:
+                start_value = year_data['total_value'].iloc[0]
+                end_value = year_data['total_value'].iloc[-1]
+            elif prev_year_end_value is not None:
+                # 마지막 연도: 스냅샷이 1개뿐이면 이전 연도 종료값을 시작값으로 사용
+                start_value = prev_year_end_value
+                end_value = year_data['total_value'].iloc[-1]
+            else:
+                # 첫 연도인데 스냅샷이 1개뿐이면 스킵
+                continue
+
+            prev_year_end_value = end_value
             
             # 전년도 양도소득세 납부액을 차감한 시작 가치
             capital_tax_paid = capital_tax_payment_by_year.get(year, 0.0)
