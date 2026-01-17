@@ -69,6 +69,82 @@ Kquant/
 - 연간 양도차익 누적 추적
 - 이연 납부 방식 (year-end settlement → January payment)
 
+## 계산 로직 상세
+
+### 배당금 처리
+
+```
+yfinance (세전 배당금)
+       │
+       ▼
+gross_dividend = 보유주식 × 주당배당금
+       │
+       ▼
+tax = gross_dividend × 15%
+net_dividend = gross_dividend - tax
+       │
+       ▼
+self.cash += net_dividend (세후만 현금에 추가)
+```
+
+- **원천 데이터**: yfinance `ticker.dividends` → 세전(gross) 배당금
+- **현금 유입**: 세후(net) 배당금만 포트폴리오 현금에 추가
+- **포트폴리오 가치**: 세후 기준으로 반영
+
+### 인출금 처리
+
+```
+target_withdrawal = portfolio_value × withdrawal_rate
+
+1. 현금(배당금 포함)에서 우선 차감
+   from_cash = min(self.cash, target_withdrawal)
+
+2. 부족분은 포트폴리오에서 비례 매도
+   remaining = target_withdrawal - from_cash
+   → 각 ETF를 목표 배분 비율에 따라 매도
+   → 매도 시 양도차익 기록
+```
+
+- 리밸런싱 시점마다 실행 (분기별/연간)
+- 배당금 처리 → 인출 처리 → 리밸런싱 순서
+
+### 양도소득세 이연 납부
+
+```
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+              발생 연도 (예: 2024년)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Q1~Q4: 리밸런싱/인출 시 매도
+       → 양도차익 누적 기록 (세금 차감 없음)
+       → record_capital_gain(gain, date)
+
+12/31: 연말 정산
+       → 손익통산 (수익 + 손실 합산)
+       → 기본공제 $2,000 적용
+       → 과세표준 × 22% = 세금 계산
+       → 세금 기록 (아직 차감 안 함)
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+              납부 연도 (예: 2025년)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+1월: 이연된 양도소득세 납부
+     → 현금에서 우선 차감
+     → 부족하면 포트폴리오 비례 매도
+```
+
+### 연간 요약 테이블 수익률
+
+```python
+return_pct = (end_value / start_value_after_capital_tax - 1) × 100
+```
+
+| 항목 | 설명 |
+|------|------|
+| `start_value` | 연초 포트폴리오 가치 |
+| `start_value_after_capital_tax` | 연초 가치 - 전년도 양도세 납부액 |
+| `end_value` | 연말 포트폴리오 가치 (인출금/세금/거래비용 차감 후) |
+| `return_pct` | **인출금 차감 후** 수익률 |
+
 ### 대시보드 페이지
 
 **allocation_backtest_page.py**: 단일 포트폴리오 분석
