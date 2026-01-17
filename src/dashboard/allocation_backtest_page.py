@@ -226,7 +226,13 @@ def display_backtest_results(result: BacktestResult, backtester: PortfolioBackte
     
     st.markdown("---")
     st.subheader("백테스트 결과")
-    
+
+    # 분석 기간 표시
+    if result.portfolio_history:
+        start_date = result.portfolio_history[0].date.strftime('%Y-%m-%d')
+        end_date = result.portfolio_history[-1].date.strftime('%Y-%m-%d')
+        st.markdown(f"**분석 기간**: {start_date} ~ {end_date}")
+
     # 1. 주요 성과 지표
     st.markdown("**주요 성과 지표**")
     
