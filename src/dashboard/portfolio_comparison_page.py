@@ -291,24 +291,24 @@ def _display_comparison_results(
     
     # 1. 성과 요약 테이블
     st.markdown("### 성과 요약")
-    
+
     summary_data = {
         "지표": [
-            "최종 자산",
-            "총 수익률",
-            "CAGR",
-            "변동성",
+            "최종 자산 ($)",
+            "총 수익률 (%)",
+            "CAGR (%)",
+            "변동성 (%)",
             "샤프비율",
-            "최대 낙폭",
-            "총 인출금",
-            "총 배당금 (세후)",
-            "총 세금",
-            "총 세금(배당)",
-            "총 세금(양도)",
-            "총 거래비용"
+            "최대 낙폭 (%)",
+            "총 인출금 ($)",
+            "총 배당금(세후) ($)",
+            "총 세금 ($)",
+            "총 세금(배당) ($)",
+            "총 세금(양도) ($)",
+            "총 거래비용 ($)"
         ]
     }
-    
+
     # 각 포트폴리오 결과 추가
     for i, result in enumerate(results):
         dividend_tax = sum(
@@ -321,63 +321,63 @@ def _display_comparison_results(
         )
 
         summary_data[f"포트폴리오 {i+1}"] = [
-            f"${result.final_value:,.0f}",
-            f"{result.total_return:.1f}%",
-            f"{result.cagr:.2f}%",
-            f"{result.volatility:.2f}%",
-            f"{result.sharpe_ratio:.2f}",
-            f"{result.max_drawdown:.1f}%",
-            f"${result.total_withdrawal:,.0f}",
-            f"${result.total_dividend_net:,.0f}",
-            f"${result.total_tax:,.0f}",
-            f"${dividend_tax:,.0f}",
-            f"${capital_gains_tax:,.0f}",
-            f"${result.total_transaction_cost:,.0f}"
+            int(round(result.final_value)),
+            round(result.total_return, 1),
+            round(result.cagr, 1),
+            round(result.volatility, 1),
+            round(result.sharpe_ratio, 2),
+            round(result.max_drawdown, 1),
+            int(round(result.total_withdrawal)),
+            int(round(result.total_dividend_net)),
+            int(round(result.total_tax)),
+            int(round(dividend_tax)),
+            int(round(capital_gains_tax)),
+            int(round(result.total_transaction_cost))
         ]
-    
+
     # 차이 컬럼 추가 (포트폴리오 1 기준)
     result_1 = results[0]
     result_2 = results[1]
-    
+
     dividend_tax_1 = sum(e.tax_amount for e in result_1.tax_events if e.tax_type == 'dividend')
     capital_tax_1 = sum(e.tax_amount for e in result_1.tax_events if e.tax_type == 'capital_gains')
     dividend_tax_2 = sum(e.tax_amount for e in result_2.tax_events if e.tax_type == 'dividend')
     capital_tax_2 = sum(e.tax_amount for e in result_2.tax_events if e.tax_type == 'capital_gains')
 
     summary_data["1 vs 2"] = [
-        f"${result_1.final_value - result_2.final_value:+,.0f}",
-        f"{result_1.total_return - result_2.total_return:+.1f}%p",
-        f"{result_1.cagr - result_2.cagr:+.2f}%p",
-        f"{result_1.volatility - result_2.volatility:+.2f}%p",
-        f"{result_1.sharpe_ratio - result_2.sharpe_ratio:+.2f}",
-        f"{result_1.max_drawdown - result_2.max_drawdown:+.1f}%p",
-        f"${result_1.total_withdrawal - result_2.total_withdrawal:+,.0f}",
-        f"${result_1.total_dividend_net - result_2.total_dividend_net:+,.0f}",
-        f"${result_1.total_tax - result_2.total_tax:+,.0f}",
-        f"${dividend_tax_1 - dividend_tax_2:+,.0f}",
-        f"${capital_tax_1 - capital_tax_2:+,.0f}",
-        f"${result_1.total_transaction_cost - result_2.total_transaction_cost:+,.0f}"
+        int(round(result_1.final_value - result_2.final_value)),
+        round(result_1.total_return - result_2.total_return, 1),
+        round(result_1.cagr - result_2.cagr, 1),
+        round(result_1.volatility - result_2.volatility, 1),
+        round(result_1.sharpe_ratio - result_2.sharpe_ratio, 2),
+        round(result_1.max_drawdown - result_2.max_drawdown, 1),
+        int(round(result_1.total_withdrawal - result_2.total_withdrawal)),
+        int(round(result_1.total_dividend_net - result_2.total_dividend_net)),
+        int(round(result_1.total_tax - result_2.total_tax)),
+        int(round(dividend_tax_1 - dividend_tax_2)),
+        int(round(capital_tax_1 - capital_tax_2)),
+        int(round(result_1.total_transaction_cost - result_2.total_transaction_cost))
     ]
-    
+
     if num_portfolios >= 3:
         result_3 = results[2]
         dividend_tax_3 = sum(e.tax_amount for e in result_3.tax_events if e.tax_type == 'dividend')
         capital_tax_3 = sum(e.tax_amount for e in result_3.tax_events if e.tax_type == 'capital_gains')
         summary_data["1 vs 3"] = [
-            f"${result_1.final_value - result_3.final_value:+,.0f}",
-            f"{result_1.total_return - result_3.total_return:+.1f}%p",
-            f"{result_1.cagr - result_3.cagr:+.2f}%p",
-            f"{result_1.volatility - result_3.volatility:+.2f}%p",
-            f"{result_1.sharpe_ratio - result_3.sharpe_ratio:+.2f}",
-            f"{result_1.max_drawdown - result_3.max_drawdown:+.1f}%p",
-            f"${result_1.total_withdrawal - result_3.total_withdrawal:+,.0f}",
-            f"${result_1.total_dividend_net - result_3.total_dividend_net:+,.0f}",
-            f"${result_1.total_tax - result_3.total_tax:+,.0f}",
-            f"${dividend_tax_1 - dividend_tax_3:+,.0f}",
-            f"${capital_tax_1 - capital_tax_3:+,.0f}",
-            f"${result_1.total_transaction_cost - result_3.total_transaction_cost:+,.0f}"
+            int(round(result_1.final_value - result_3.final_value)),
+            round(result_1.total_return - result_3.total_return, 1),
+            round(result_1.cagr - result_3.cagr, 1),
+            round(result_1.volatility - result_3.volatility, 1),
+            round(result_1.sharpe_ratio - result_3.sharpe_ratio, 2),
+            round(result_1.max_drawdown - result_3.max_drawdown, 1),
+            int(round(result_1.total_withdrawal - result_3.total_withdrawal)),
+            int(round(result_1.total_dividend_net - result_3.total_dividend_net)),
+            int(round(result_1.total_tax - result_3.total_tax)),
+            int(round(dividend_tax_1 - dividend_tax_3)),
+            int(round(capital_tax_1 - capital_tax_3)),
+            int(round(result_1.total_transaction_cost - result_3.total_transaction_cost))
         ]
-    
+
     summary_df = pd.DataFrame(summary_data)
     st.dataframe(summary_df, use_container_width=True, hide_index=True)
     

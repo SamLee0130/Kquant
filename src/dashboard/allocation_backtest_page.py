@@ -413,25 +413,24 @@ def display_backtest_results(result: BacktestResult, backtester: PortfolioBackte
     annual_df = backtester.get_annual_summary_df(result)
     
     if not annual_df.empty:
-        # 포맷팅
+        # 포맷팅: 숫자값 유지, 소수점 처리
         display_df = annual_df.copy()
         display_df['year'] = display_df['year'].astype(int)
-        display_df['start_value'] = display_df['start_value'].apply(lambda x: f"${x:,.0f}")
-        display_df['start_value_after_capital_tax'] = display_df['start_value_after_capital_tax'].apply(lambda x: f"${x:,.0f}")
-        display_df['end_value'] = display_df['end_value'].apply(lambda x: f"${x:,.0f}")
-        display_df['return_pct'] = display_df['return_pct'].apply(lambda x: f"{x:+.1f}%")
-        display_df['withdrawal'] = display_df['withdrawal'].apply(lambda x: f"${x:,.0f}")
-        display_df['dividend_gross'] = display_df['dividend_gross'].apply(lambda x: f"${x:,.0f}")
-        display_df['dividend_net'] = display_df['dividend_net'].apply(lambda x: f"${x:,.0f}")
-        display_df['tax_dividend'] = display_df['tax_dividend'].apply(lambda x: f"${x:,.0f}")
-        display_df['tax_capital_gains'] = display_df['tax_capital_gains'].apply(lambda x: f"${x:,.0f}")
-        display_df['transaction_cost'] = display_df['transaction_cost'].apply(lambda x: f"${x:,.0f}")
-        
+        display_df['return_pct'] = display_df['return_pct'].round(1)
+
+        # 달러 컬럼들은 정수로 반올림
+        dollar_columns = ['start_value', 'start_value_after_capital_tax', 'end_value',
+                          'withdrawal', 'dividend_gross', 'dividend_net',
+                          'tax_dividend', 'tax_capital_gains', 'transaction_cost']
+        for col in dollar_columns:
+            if col in display_df.columns:
+                display_df[col] = display_df[col].round(0).astype(int)
+
         display_df.columns = [
-            '연도', '시작 가치', '시작 가치(양도세 차감 후)', '종료 가치', '수익률',
-            '인출금', '배당금(세전)', '배당금(세후)', '세금(배당)', '세금(양도 차익)', '거래비용'
+            '연도', '시작 가치 ($)', '시작 가치(양도세 차감 후) ($)', '종료 가치 ($)', '수익률 (%)',
+            '인출금 ($)', '배당금(세전) ($)', '배당금(세후) ($)', '세금(배당) ($)', '세금(양도 차익) ($)', '거래비용 ($)'
         ]
-        
+
         st.dataframe(display_df, use_container_width=True, hide_index=True)
     
     # 5. 인출금 vs 배당금 비교
