@@ -622,10 +622,37 @@ class PortfolioBacktester:
                 )
                 portfolio_history.append(snapshot)
         
+        # 종료일이 리밸런싱 날짜인 경우 마지막 리밸런싱 처리 (휴장일인 경우 루프에서 처리되지 않음)
+        final_end_date = pd.Timestamp(end_date)
+        if final_end_date in rebalance_dates and prev_rebalance_date != final_end_date:
+            # 연초 양도소득세 납부 (이전 연도와 다른 경우)
+            if prev_year is not None and final_end_date.year != prev_year:
+                tax = self._apply_deferred_tax(final_end_date.year)
+                cumulative_tax += tax
+
+            # 배당금 처리
+            dividend_cash = self._process_dividends(last_dividend_processed_date, final_end_date)
+            cumulative_dividend += dividend_cash
+            last_dividend_processed_date = final_end_date
+
+            # 인출 처리
+            withdrawal_event = self._process_withdrawal(final_end_date, dividend_cash)
+            cumulative_withdrawal += withdrawal_event['total_withdrawal']
+
+            # 리밸런싱
+            self._rebalance(final_end_date)
+
+            # 연말 세금 정산 (이전 연도와 다른 경우)
+            if prev_year is not None and final_end_date.year != prev_year:
+                self._process_year_end_tax(prev_year, final_end_date)
+
+            prev_year = final_end_date.year
+            prev_rebalance_date = final_end_date
+
         # 마지막 배당금 처리 (마지막 리밸런싱 이후 ~ 종료일)
         final_dividend = self._process_dividends(last_dividend_processed_date, pd.Timestamp(end_date))
         cumulative_dividend += final_dividend
-        
+
         # 마지막 연도 세금 정산
         if prev_year:
             self._process_year_end_tax(prev_year, pd.Timestamp(end_date))
