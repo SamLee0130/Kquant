@@ -14,5 +14,5 @@ sys.path.append(str(project_root))
 # 메인 대시보드 실행
 from src.dashboard.main_app import main
 
-if __name__ == "__main__":
-    main()
+# Streamlit은 스크립트를 직접 실행하므로 조건문 없이 main() 호출
+main()

@@ -9,6 +9,10 @@ import time
 import sys
 import socket
 from pathlib import Path
+from playwright.sync_api import Page
+
+# pytest-playwright 플러그인 활성화
+pytest_plugins = ["pytest_playwright"]
 
 
 def is_port_in_use(port: int) -> bool:
