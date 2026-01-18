@@ -1,7 +1,7 @@
 """
 포트폴리오 비교 페이지
 
-최대 3개의 자산 배분 포트폴리오 성과를 비교합니다.
+최대 5개의 자산 배분 포트폴리오 성과를 비교합니다.
 """
 import streamlit as st
 import pandas as pd
@@ -16,13 +16,13 @@ from config.settings import ETF_BACKTEST_DEFAULTS
 logger = logging.getLogger(__name__)
 
 # 포트폴리오별 색상
-PORTFOLIO_COLORS = ['#1f77b4', '#ff7f0e', '#2ca02c']
+PORTFOLIO_COLORS = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd']
 
 
 def show_portfolio_comparison_page():
     """포트폴리오 비교 페이지 표시"""
     st.header("포트폴리오 비교")
-    st.markdown("최대 3개의 자산 배분 포트폴리오 성과를 비교합니다.")
+    st.markdown("최대 5개의 자산 배분 포트폴리오 성과를 비교합니다.")
     st.markdown("---")
     
     # 사이드바 - 공통 설정
@@ -99,50 +99,103 @@ def show_portfolio_comparison_page():
             help="거래수수료 + 슬리피지 (거래금액의 %)"
         ) / 100
     
-    # 포트폴리오 3 활성화 여부 (메인 영역 상단)
-    enable_portfolio_3 = st.checkbox(
-        "포트폴리오 3 추가",
-        value=False,
-        key="enable_portfolio_3"
-    )
-    
-    # 세션 상태 초기화 - 포트폴리오 1, 2, 3
+    # 포트폴리오 추가 활성화 여부 (메인 영역 상단)
+    col_check1, col_check2, col_check3 = st.columns(3)
+
+    with col_check1:
+        enable_portfolio_3 = st.checkbox(
+            "포트폴리오 3 추가",
+            value=False,
+            key="enable_portfolio_3"
+        )
+
+    with col_check2:
+        enable_portfolio_4 = st.checkbox(
+            "포트폴리오 4 추가",
+            value=False,
+            key="enable_portfolio_4"
+        )
+
+    with col_check3:
+        enable_portfolio_5 = st.checkbox(
+            "포트폴리오 5 추가",
+            value=False,
+            key="enable_portfolio_5"
+        )
+
+    # 세션 상태 초기화 - 포트폴리오 1, 2, 3, 4, 5
     if 'portfolio_1' not in st.session_state:
         st.session_state.portfolio_1 = {'SPY': 0.60, 'QQQ': 0.30, 'BIL': 0.10}
-    
+
     if 'portfolio_2' not in st.session_state:
         st.session_state.portfolio_2 = {'SPY': 0.40, 'QQQ': 0.40, 'BND': 0.20}
-    
+
     if 'portfolio_3' not in st.session_state:
         st.session_state.portfolio_3 = {'VTI': 0.50, 'VXUS': 0.30, 'BND': 0.20}
+
+    if 'portfolio_4' not in st.session_state:
+        st.session_state.portfolio_4 = {'SPY': 0.30, 'QQQ': 0.30, 'VTI': 0.20, 'BND': 0.20}
+
+    if 'portfolio_5' not in st.session_state:
+        st.session_state.portfolio_5 = {'SPY': 0.25, 'QQQ': 0.25, 'VTI': 0.25, 'BND': 0.25}
     
     # 메인 영역 - 포트폴리오 설정
+    # 활성화된 포트폴리오 수 계산
+    num_portfolios = 2
     if enable_portfolio_3:
-        col1, col2, col3 = st.columns(3)
-    else:
-        col1, col2 = st.columns(2)
-    
-    with col1:
+        num_portfolios = 3
+    if enable_portfolio_4:
+        num_portfolios = 4
+    if enable_portfolio_5:
+        num_portfolios = 5
+
+    # 컬럼 생성
+    cols = st.columns(num_portfolios)
+
+    # 포트폴리오 1
+    with cols[0]:
         st.subheader("포트폴리오 1")
         allocation_1 = _render_portfolio_allocation(
             st.session_state.portfolio_1,
             key_prefix="p1"
         )
-    
-    with col2:
+
+    # 포트폴리오 2
+    with cols[1]:
         st.subheader("포트폴리오 2")
         allocation_2 = _render_portfolio_allocation(
             st.session_state.portfolio_2,
             key_prefix="p2"
         )
-    
+
+    # 포트폴리오 3
     allocation_3 = None
     if enable_portfolio_3:
-        with col3:
+        with cols[2]:
             st.subheader("포트폴리오 3")
             allocation_3 = _render_portfolio_allocation(
                 st.session_state.portfolio_3,
                 key_prefix="p3"
+            )
+
+    # 포트폴리오 4
+    allocation_4 = None
+    if enable_portfolio_4:
+        with cols[3]:
+            st.subheader("포트폴리오 4")
+            allocation_4 = _render_portfolio_allocation(
+                st.session_state.portfolio_4,
+                key_prefix="p4"
+            )
+
+    # 포트폴리오 5
+    allocation_5 = None
+    if enable_portfolio_5:
+        with cols[4]:
+            st.subheader("포트폴리오 5")
+            allocation_5 = _render_portfolio_allocation(
+                st.session_state.portfolio_5,
+                key_prefix="p5"
             )
     
     st.markdown("---")
@@ -151,9 +204,11 @@ def show_portfolio_comparison_page():
     valid_1 = abs(sum(allocation_1.values()) - 1.0) <= 0.01
     valid_2 = abs(sum(allocation_2.values()) - 1.0) <= 0.01
     valid_3 = True if not enable_portfolio_3 else abs(sum(allocation_3.values()) - 1.0) <= 0.01
-    
-    all_valid = valid_1 and valid_2 and valid_3
-    
+    valid_4 = True if not enable_portfolio_4 else abs(sum(allocation_4.values()) - 1.0) <= 0.01
+    valid_5 = True if not enable_portfolio_5 else abs(sum(allocation_5.values()) - 1.0) <= 0.01
+
+    all_valid = valid_1 and valid_2 and valid_3 and valid_4 and valid_5
+
     if st.button("비교 실행", type="primary", disabled=not all_valid):
         if not valid_1:
             st.error("포트폴리오 1의 비중 합계가 100%가 아닙니다.")
@@ -163,6 +218,12 @@ def show_portfolio_comparison_page():
             return
         if enable_portfolio_3 and not valid_3:
             st.error("포트폴리오 3의 비중 합계가 100%가 아닙니다.")
+            return
+        if enable_portfolio_4 and not valid_4:
+            st.error("포트폴리오 4의 비중 합계가 100%가 아닙니다.")
+            return
+        if enable_portfolio_5 and not valid_5:
+            st.error("포트폴리오 5의 비중 합계가 100%가 아닙니다.")
             return
         
         with st.spinner("백테스트 실행 중..."):
@@ -184,29 +245,53 @@ def show_portfolio_comparison_page():
             # 포트폴리오 1 백테스트
             backtester_1 = PortfolioBacktester(allocation=allocation_1, **common_params)
             result_1 = backtester_1.run(start_date, end_date)
-            
+
             # 포트폴리오 2 백테스트
             backtester_2 = PortfolioBacktester(allocation=allocation_2, **common_params)
             result_2 = backtester_2.run(start_date, end_date)
-            
+
             # 포트폴리오 3 백테스트 (활성화된 경우)
             backtester_3 = None
             result_3 = None
             if enable_portfolio_3:
                 backtester_3 = PortfolioBacktester(allocation=allocation_3, **common_params)
                 result_3 = backtester_3.run(start_date, end_date)
+
+            # 포트폴리오 4 백테스트 (활성화된 경우)
+            backtester_4 = None
+            result_4 = None
+            if enable_portfolio_4:
+                backtester_4 = PortfolioBacktester(allocation=allocation_4, **common_params)
+                result_4 = backtester_4.run(start_date, end_date)
+
+            # 포트폴리오 5 백테스트 (활성화된 경우)
+            backtester_5 = None
+            result_5 = None
+            if enable_portfolio_5:
+                backtester_5 = PortfolioBacktester(allocation=allocation_5, **common_params)
+                result_5 = backtester_5.run(start_date, end_date)
         
         st.success("비교 완료!")
-        
+
         # 결과 수집
         backtesters = [backtester_1, backtester_2]
         results = [result_1, result_2]
         allocations = [allocation_1, allocation_2]
-        
+
         if enable_portfolio_3:
             backtesters.append(backtester_3)
             results.append(result_3)
             allocations.append(allocation_3)
+
+        if enable_portfolio_4:
+            backtesters.append(backtester_4)
+            results.append(result_4)
+            allocations.append(allocation_4)
+
+        if enable_portfolio_5:
+            backtesters.append(backtester_5)
+            results.append(result_5)
+            allocations.append(allocation_5)
         
         # 결과 표시
         _display_comparison_results(
@@ -276,7 +361,7 @@ def _display_comparison_results(
     allocations: List[Dict[str, float]],
     initial_capital: float
 ):
-    """비교 결과 표시 (2~3개 포트폴리오 지원)"""
+    """비교 결과 표시 (2~5개 포트폴리오 지원)"""
     
     num_portfolios = len(results)
     
@@ -376,6 +461,44 @@ def _display_comparison_results(
             int(round(dividend_tax_1 - dividend_tax_3)),
             int(round(capital_tax_1 - capital_tax_3)),
             int(round(result_1.total_transaction_cost - result_3.total_transaction_cost))
+        ]
+
+    if num_portfolios >= 4:
+        result_4 = results[3]
+        dividend_tax_4 = sum(e.tax_amount for e in result_4.tax_events if e.tax_type == 'dividend')
+        capital_tax_4 = sum(e.tax_amount for e in result_4.tax_events if e.tax_type == 'capital_gains')
+        summary_data["1 vs 4"] = [
+            int(round(result_1.final_value - result_4.final_value)),
+            round(result_1.total_return - result_4.total_return, 1),
+            round(result_1.cagr - result_4.cagr, 1),
+            round(result_1.volatility - result_4.volatility, 1),
+            round(result_1.sharpe_ratio - result_4.sharpe_ratio, 2),
+            round(result_1.max_drawdown - result_4.max_drawdown, 1),
+            int(round(result_1.total_withdrawal - result_4.total_withdrawal)),
+            int(round(result_1.total_dividend_net - result_4.total_dividend_net)),
+            int(round(result_1.total_tax - result_4.total_tax)),
+            int(round(dividend_tax_1 - dividend_tax_4)),
+            int(round(capital_tax_1 - capital_tax_4)),
+            int(round(result_1.total_transaction_cost - result_4.total_transaction_cost))
+        ]
+
+    if num_portfolios >= 5:
+        result_5 = results[4]
+        dividend_tax_5 = sum(e.tax_amount for e in result_5.tax_events if e.tax_type == 'dividend')
+        capital_tax_5 = sum(e.tax_amount for e in result_5.tax_events if e.tax_type == 'capital_gains')
+        summary_data["1 vs 5"] = [
+            int(round(result_1.final_value - result_5.final_value)),
+            round(result_1.total_return - result_5.total_return, 1),
+            round(result_1.cagr - result_5.cagr, 1),
+            round(result_1.volatility - result_5.volatility, 1),
+            round(result_1.sharpe_ratio - result_5.sharpe_ratio, 2),
+            round(result_1.max_drawdown - result_5.max_drawdown, 1),
+            int(round(result_1.total_withdrawal - result_5.total_withdrawal)),
+            int(round(result_1.total_dividend_net - result_5.total_dividend_net)),
+            int(round(result_1.total_tax - result_5.total_tax)),
+            int(round(dividend_tax_1 - dividend_tax_5)),
+            int(round(capital_tax_1 - capital_tax_5)),
+            int(round(result_1.total_transaction_cost - result_5.total_transaction_cost))
         ]
 
     summary_df = pd.DataFrame(summary_data)
