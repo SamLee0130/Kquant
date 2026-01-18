@@ -140,63 +140,37 @@ def show_portfolio_comparison_page():
         st.session_state.portfolio_5 = {'SPY': 0.25, 'QQQ': 0.25, 'VTI': 0.25, 'BND': 0.25}
     
     # 메인 영역 - 포트폴리오 설정
-    # 활성화된 포트폴리오 수 계산
-    num_portfolios = 2
-    if enable_portfolio_3:
-        num_portfolios = 3
-    if enable_portfolio_4:
-        num_portfolios = 4
-    if enable_portfolio_5:
-        num_portfolios = 5
+    # 활성화된 포트폴리오 목록 생성
+    portfolios = [
+        ('포트폴리오 1', st.session_state.portfolio_1, 'p1'),
+        ('포트폴리오 2', st.session_state.portfolio_2, 'p2'),
+    ]
 
-    # 컬럼 생성
+    if enable_portfolio_3:
+        portfolios.append(('포트폴리오 3', st.session_state.portfolio_3, 'p3'))
+    if enable_portfolio_4:
+        portfolios.append(('포트폴리오 4', st.session_state.portfolio_4, 'p4'))
+    if enable_portfolio_5:
+        portfolios.append(('포트폴리오 5', st.session_state.portfolio_5, 'p5'))
+
+    num_portfolios = len(portfolios)
+
+    # 컬럼 생성 및 포트폴리오 할당 UI 렌더링
     cols = st.columns(num_portfolios)
+    allocations = []
 
-    # 포트폴리오 1
-    with cols[0]:
-        st.subheader("포트폴리오 1")
-        allocation_1 = _render_portfolio_allocation(
-            st.session_state.portfolio_1,
-            key_prefix="p1"
-        )
+    for col, (name, default_allocation, key_prefix) in zip(cols, portfolios):
+        with col:
+            st.subheader(name)
+            allocation = _render_portfolio_allocation(default_allocation, key_prefix)
+            allocations.append(allocation)
 
-    # 포트폴리오 2
-    with cols[1]:
-        st.subheader("포트폴리오 2")
-        allocation_2 = _render_portfolio_allocation(
-            st.session_state.portfolio_2,
-            key_prefix="p2"
-        )
-
-    # 포트폴리오 3
-    allocation_3 = None
-    if enable_portfolio_3:
-        with cols[2]:
-            st.subheader("포트폴리오 3")
-            allocation_3 = _render_portfolio_allocation(
-                st.session_state.portfolio_3,
-                key_prefix="p3"
-            )
-
-    # 포트폴리오 4
-    allocation_4 = None
-    if enable_portfolio_4:
-        with cols[3]:
-            st.subheader("포트폴리오 4")
-            allocation_4 = _render_portfolio_allocation(
-                st.session_state.portfolio_4,
-                key_prefix="p4"
-            )
-
-    # 포트폴리오 5
-    allocation_5 = None
-    if enable_portfolio_5:
-        with cols[4]:
-            st.subheader("포트폴리오 5")
-            allocation_5 = _render_portfolio_allocation(
-                st.session_state.portfolio_5,
-                key_prefix="p5"
-            )
+    # 개별 변수에 할당 (하위 호환성 유지)
+    allocation_1 = allocations[0]
+    allocation_2 = allocations[1]
+    allocation_3 = allocations[2] if num_portfolios >= 3 else None
+    allocation_4 = allocations[3] if num_portfolios >= 4 else None
+    allocation_5 = allocations[4] if num_portfolios >= 5 else None
     
     st.markdown("---")
     
@@ -422,83 +396,28 @@ def _display_comparison_results(
 
     # 차이 컬럼 추가 (포트폴리오 1 기준)
     result_1 = results[0]
-    result_2 = results[1]
-
     dividend_tax_1 = sum(e.tax_amount for e in result_1.tax_events if e.tax_type == 'dividend')
     capital_tax_1 = sum(e.tax_amount for e in result_1.tax_events if e.tax_type == 'capital_gains')
-    dividend_tax_2 = sum(e.tax_amount for e in result_2.tax_events if e.tax_type == 'dividend')
-    capital_tax_2 = sum(e.tax_amount for e in result_2.tax_events if e.tax_type == 'capital_gains')
 
-    summary_data["1 vs 2"] = [
-        int(round(result_1.final_value - result_2.final_value)),
-        round(result_1.total_return - result_2.total_return, 1),
-        round(result_1.cagr - result_2.cagr, 1),
-        round(result_1.volatility - result_2.volatility, 1),
-        round(result_1.sharpe_ratio - result_2.sharpe_ratio, 2),
-        round(result_1.max_drawdown - result_2.max_drawdown, 1),
-        int(round(result_1.total_withdrawal - result_2.total_withdrawal)),
-        int(round(result_1.total_dividend_net - result_2.total_dividend_net)),
-        int(round(result_1.total_tax - result_2.total_tax)),
-        int(round(dividend_tax_1 - dividend_tax_2)),
-        int(round(capital_tax_1 - capital_tax_2)),
-        int(round(result_1.total_transaction_cost - result_2.total_transaction_cost))
-    ]
+    # 포트폴리오 2~5에 대한 비교 컬럼 추가 (루프로 처리)
+    for idx in range(1, num_portfolios):
+        result_n = results[idx]
+        dividend_tax_n = sum(e.tax_amount for e in result_n.tax_events if e.tax_type == 'dividend')
+        capital_tax_n = sum(e.tax_amount for e in result_n.tax_events if e.tax_type == 'capital_gains')
 
-    if num_portfolios >= 3:
-        result_3 = results[2]
-        dividend_tax_3 = sum(e.tax_amount for e in result_3.tax_events if e.tax_type == 'dividend')
-        capital_tax_3 = sum(e.tax_amount for e in result_3.tax_events if e.tax_type == 'capital_gains')
-        summary_data["1 vs 3"] = [
-            int(round(result_1.final_value - result_3.final_value)),
-            round(result_1.total_return - result_3.total_return, 1),
-            round(result_1.cagr - result_3.cagr, 1),
-            round(result_1.volatility - result_3.volatility, 1),
-            round(result_1.sharpe_ratio - result_3.sharpe_ratio, 2),
-            round(result_1.max_drawdown - result_3.max_drawdown, 1),
-            int(round(result_1.total_withdrawal - result_3.total_withdrawal)),
-            int(round(result_1.total_dividend_net - result_3.total_dividend_net)),
-            int(round(result_1.total_tax - result_3.total_tax)),
-            int(round(dividend_tax_1 - dividend_tax_3)),
-            int(round(capital_tax_1 - capital_tax_3)),
-            int(round(result_1.total_transaction_cost - result_3.total_transaction_cost))
-        ]
-
-    if num_portfolios >= 4:
-        result_4 = results[3]
-        dividend_tax_4 = sum(e.tax_amount for e in result_4.tax_events if e.tax_type == 'dividend')
-        capital_tax_4 = sum(e.tax_amount for e in result_4.tax_events if e.tax_type == 'capital_gains')
-        summary_data["1 vs 4"] = [
-            int(round(result_1.final_value - result_4.final_value)),
-            round(result_1.total_return - result_4.total_return, 1),
-            round(result_1.cagr - result_4.cagr, 1),
-            round(result_1.volatility - result_4.volatility, 1),
-            round(result_1.sharpe_ratio - result_4.sharpe_ratio, 2),
-            round(result_1.max_drawdown - result_4.max_drawdown, 1),
-            int(round(result_1.total_withdrawal - result_4.total_withdrawal)),
-            int(round(result_1.total_dividend_net - result_4.total_dividend_net)),
-            int(round(result_1.total_tax - result_4.total_tax)),
-            int(round(dividend_tax_1 - dividend_tax_4)),
-            int(round(capital_tax_1 - capital_tax_4)),
-            int(round(result_1.total_transaction_cost - result_4.total_transaction_cost))
-        ]
-
-    if num_portfolios >= 5:
-        result_5 = results[4]
-        dividend_tax_5 = sum(e.tax_amount for e in result_5.tax_events if e.tax_type == 'dividend')
-        capital_tax_5 = sum(e.tax_amount for e in result_5.tax_events if e.tax_type == 'capital_gains')
-        summary_data["1 vs 5"] = [
-            int(round(result_1.final_value - result_5.final_value)),
-            round(result_1.total_return - result_5.total_return, 1),
-            round(result_1.cagr - result_5.cagr, 1),
-            round(result_1.volatility - result_5.volatility, 1),
-            round(result_1.sharpe_ratio - result_5.sharpe_ratio, 2),
-            round(result_1.max_drawdown - result_5.max_drawdown, 1),
-            int(round(result_1.total_withdrawal - result_5.total_withdrawal)),
-            int(round(result_1.total_dividend_net - result_5.total_dividend_net)),
-            int(round(result_1.total_tax - result_5.total_tax)),
-            int(round(dividend_tax_1 - dividend_tax_5)),
-            int(round(capital_tax_1 - capital_tax_5)),
-            int(round(result_1.total_transaction_cost - result_5.total_transaction_cost))
+        summary_data[f"1 vs {idx+1}"] = [
+            int(round(result_1.final_value - result_n.final_value)),
+            round(result_1.total_return - result_n.total_return, 1),
+            round(result_1.cagr - result_n.cagr, 1),
+            round(result_1.volatility - result_n.volatility, 1),
+            round(result_1.sharpe_ratio - result_n.sharpe_ratio, 2),
+            round(result_1.max_drawdown - result_n.max_drawdown, 1),
+            int(round(result_1.total_withdrawal - result_n.total_withdrawal)),
+            int(round(result_1.total_dividend_net - result_n.total_dividend_net)),
+            int(round(result_1.total_tax - result_n.total_tax)),
+            int(round(dividend_tax_1 - dividend_tax_n)),
+            int(round(capital_tax_1 - capital_tax_n)),
+            int(round(result_1.total_transaction_cost - result_n.total_transaction_cost))
         ]
 
     summary_df = pd.DataFrame(summary_data)
