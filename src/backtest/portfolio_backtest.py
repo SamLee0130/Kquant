@@ -280,7 +280,9 @@ class PortfolioBacktester:
                     'shares': shares_to_trade,
                     'price': price,
                     'value': diff_value,
-                    'transaction_cost': trade_cost
+                    'transaction_cost': trade_cost,
+                    'current_shares': current_shares,
+                    'target_shares': current_shares + shares_to_trade
                 })
         
         # 거래가 있었을 때만 거래비용 차감
@@ -576,6 +578,7 @@ class PortfolioBacktester:
                 # 첫 리밸런싱에서 초기 매수 수행
                 if not initial_invested:
                     total_invested = 0.0
+                    initial_trades = []
                     for symbol, weight in self.allocation.items():
                         price = self._get_price(symbol, date)
                         if price:
@@ -584,8 +587,27 @@ class PortfolioBacktester:
                             self.holdings[symbol] = shares
                             self.cost_basis[symbol] = price
                             total_invested += value
+                            initial_trades.append({
+                                'symbol': symbol,
+                                'shares': shares,
+                                'price': price,
+                                'value': value,
+                                'transaction_cost': 0.0,
+                                'current_shares': 0.0,
+                                'target_shares': shares
+                            })
                     self.cash = self.initial_capital - total_invested
                     initial_invested = True
+
+                    # 초기 매수 이벤트 기록
+                    self.rebalance_events.append({
+                        'date': date,
+                        'portfolio_value': self.initial_capital,
+                        'trades': initial_trades,
+                        'capital_gain': 0.0,
+                        'transaction_cost': 0.0,
+                        'is_initial_purchase': True
+                    })
                 
                 # 이전 리밸런싱 이후부터 이번 리밸런싱 시점까지 배당금 처리
                 dividend_cash = self._process_dividends(last_dividend_processed_date, date)
