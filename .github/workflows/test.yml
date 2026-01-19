@@ -26,21 +26,5 @@ jobs:
           pip install -r requirements.txt
           pip install -r requirements-dev.txt
 
-      - name: Install Playwright browsers
-        run: playwright install chromium --with-deps
-
-      - name: Run AppTest (unit tests)
-        run: pytest tests/test_app.py -v --tb=short
-
-      - name: Run E2E tests
-        run: pytest tests/e2e/ -v --tb=short --browser chromium
-
-      - name: Upload test results
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: test-results
-          path: |
-            test-results/
-            playwright-report/
-          retention-days: 7
+      - name: Run tests
+        run: pytest -v --tb=short

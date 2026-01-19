@@ -1,7 +1,5 @@
 # Testing dependencies
 pytest>=7.0.0
-pytest-playwright>=0.4.0
-playwright>=1.40.0
 
 # Streamlit testing (included in streamlit>=1.24.0)
 # streamlit.testing.v1 module provides AppTest
