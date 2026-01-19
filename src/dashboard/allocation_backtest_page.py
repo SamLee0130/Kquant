@@ -562,13 +562,13 @@ def display_backtest_results(result: BacktestResult, backtester: PortfolioBackte
                         # 현재/목표 보유량 표시 (있는 경우)
                         if 'current_shares' in trade and 'target_shares' in trade:
                             st.markdown(
-                                f"  - {trade['symbol']}: {trade['current_shares']:,.2f}주 → "
-                                f"{trade['target_shares']:,.2f}주 ({action_symbol}{abs(trade['shares']):,.2f}주 {action}) "
+                                f"  - {trade['symbol']}: {round(trade['current_shares']):,}주 → "
+                                f"{round(trade['target_shares']):,}주 ({action_symbol}{round(abs(trade['shares'])):,}주 {action}) "
                                 f"× ${trade['price']:.2f} = ${abs(trade['value']):,.0f}"
                             )
                         else:
                             st.markdown(
-                                f"  - {trade['symbol']}: {action} {abs(trade['shares']):.2f}주 "
+                                f"  - {trade['symbol']}: {action} {round(abs(trade['shares'])):,}주 "
                                 f"× ${trade['price']:.2f} = ${abs(trade['value']):,.0f}"
                             )
                 else:
