@@ -3,7 +3,18 @@
     "allow": [
       "Bash(streamlit run*)",
       "Bash(source venv/bin/activate*)",
-      "Bash(open -a \"Google Chrome\"*)"
+      "Bash(open -a \"Google Chrome\"*)",
+      "mcp__plugin_serena_serena__find_symbol",
+      "mcp__plugin_playwright_playwright__browser_navigate",
+      "mcp__plugin_playwright_playwright__browser_wait_for",
+      "mcp__plugin_playwright_playwright__browser_click",
+      "mcp__plugin_playwright_playwright__browser_close",
+      "Bash(pkill:*)",
+      "Skill(commit-commands:commit-push-pr)",
+      "Bash(git checkout:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git push:*)"
     ]
   }
 }
