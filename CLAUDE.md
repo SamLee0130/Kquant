@@ -209,3 +209,9 @@ return_pct = (end_value / start_value_after_capital_tax - 1) × 100
 
 - PR 설명(description)은 한국어로 작성
 - 커밋 메시지는 영어 또는 한국어 허용
+
+## Claude Code 사용 규칙
+
+- **Bash 명령어**: `&&`로 체이닝하지 말고 각 명령어를 개별 Bash 호출로 실행
+  - 권한 허가 요청을 줄이고 더 안전한 실행을 위함
+  - 예: `source venv/bin/activate && python app.py` 대신 두 번의 Bash 호출로 분리
