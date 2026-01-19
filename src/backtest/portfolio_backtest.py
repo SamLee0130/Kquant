@@ -130,7 +130,7 @@ class PortfolioBacktester:
             ticker = yf.Ticker(symbol)
             
             # 가격 데이터
-            hist = ticker.history(start=start_date, end=end_date)
+            hist = ticker.history(start=start_date, end=end_date, auto_adjust=False)
             if hist.empty:
                 raise ValueError(f"{symbol} 가격 데이터를 찾을 수 없습니다.")
             

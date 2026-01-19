@@ -18,6 +18,146 @@ from config.settings import ETF_BACKTEST_DEFAULTS
 logger = logging.getLogger(__name__)
 
 
+def calculate_dividend_yield(price_data: dict, dividend_data: dict, symbols: list) -> pd.DataFrame:
+    """
+    연간 배당수익률 계산
+
+    배당수익률 = (연간 배당금 합계) / (연말 주가) × 100
+
+    Args:
+        price_data: {symbol: DataFrame with 'price' column}
+        dividend_data: {symbol: Series of dividends}
+        symbols: list of ETF symbols
+
+    Returns:
+        DataFrame with annual dividend yields per symbol
+    """
+    if not price_data or not symbols:
+        return pd.DataFrame()
+
+    # 모든 데이터에서 연도 범위 추출
+    all_years = set()
+    for symbol in symbols:
+        if symbol in price_data:
+            years = price_data[symbol].index.year.unique()
+            all_years.update(years)
+
+    years = sorted(all_years)
+    yield_data = []
+
+    for year in years:
+        row = {'연도': year}
+
+        for symbol in symbols:
+            year_end_price = None
+            total_div = 0.0
+
+            # 연말 주가 (해당 연도 마지막 거래일)
+            if symbol in price_data:
+                price_df = price_data[symbol]
+                year_prices = price_df[price_df.index.year == year]
+                if len(year_prices) > 0:
+                    year_end_price = year_prices['price'].iloc[-1]
+
+            # 연간 배당금 합계
+            if symbol in dividend_data:
+                div_series = dividend_data[symbol]
+                if len(div_series) > 0:
+                    year_divs = div_series[div_series.index.year == year]
+                    total_div = year_divs.sum() if len(year_divs) > 0 else 0.0
+
+            # 배당수익률 계산
+            if year_end_price and year_end_price > 0:
+                div_yield = (total_div / year_end_price) * 100
+            else:
+                div_yield = 0.0
+
+            row[f'{symbol} (%)'] = round(div_yield, 2)
+
+        yield_data.append(row)
+
+    return pd.DataFrame(yield_data)
+
+
+def display_etf_performance(backtester: 'PortfolioBacktester'):
+    """
+    구성 종목별 성과 표시 (주가 차트 + 배당금 차트 + 배당수익률 테이블)
+
+    Args:
+        backtester: PortfolioBacktester instance with _price_data and _dividend_data
+    """
+    symbols = list(backtester.allocation.keys())
+    price_data = backtester._price_data
+    dividend_data = backtester._dividend_data
+
+    if not price_data or not symbols:
+        st.warning("종목별 성과 데이터를 표시할 수 없습니다.")
+        return
+
+    colors = px.colors.qualitative.Set2
+
+    # 탭으로 종목별 차트 표시
+    tabs = st.tabs(symbols)
+
+    for i, (tab, symbol) in enumerate(zip(tabs, symbols)):
+        with tab:
+            # 주가 + 배당금 서브플롯 차트
+            fig = make_subplots(
+                rows=2, cols=1,
+                shared_xaxes=True,
+                vertical_spacing=0.08,
+                row_heights=[0.7, 0.3],
+                subplot_titles=(f'{symbol} 주가', f'{symbol} 배당금')
+            )
+
+            # Row 1: 주가 line chart
+            if symbol in price_data:
+                df = price_data[symbol]
+                fig.add_trace(go.Scatter(
+                    x=df.index,
+                    y=df['price'],
+                    name='주가',
+                    mode='lines',
+                    line=dict(color=colors[i % len(colors)], width=2)
+                ), row=1, col=1)
+
+            # Row 2: 배당금 bar chart
+            if symbol in dividend_data:
+                div_series = dividend_data[symbol]
+                if len(div_series) > 0:
+                    fig.add_trace(go.Bar(
+                        x=div_series.index,
+                        y=div_series.values,
+                        name='배당금',
+                        marker_color=colors[i % len(colors)],
+                        opacity=0.7
+                    ), row=2, col=1)
+
+            fig.update_layout(
+                height=500,
+                hovermode='x unified',
+                showlegend=False
+            )
+
+            fig.update_yaxes(title_text="주가 (USD)", row=1, col=1)
+            fig.update_yaxes(title_text="배당금 (USD)", row=2, col=1)
+            fig.update_xaxes(title_text="날짜", row=2, col=1)
+
+            st.plotly_chart(fig, use_container_width=True)
+
+    # 2. 연간 배당수익률 테이블
+    st.markdown("**연간 배당수익률**")
+    st.caption("배당수익률 = (연간 배당금 합계) / (연말 주가) × 100")
+
+    yield_df = calculate_dividend_yield(price_data, dividend_data, symbols)
+
+    if not yield_df.empty:
+        yield_df['연도'] = yield_df['연도'].astype(int)
+        st.dataframe(yield_df, use_container_width=True, hide_index=True)
+    else:
+        st.info("배당수익률 데이터가 없습니다.")
+
+
 def show_allocation_backtest_page():
     """자산 배분 백테스트 페이지 표시"""
     st.header("자산 배분 백테스트")
@@ -412,8 +552,12 @@ def display_backtest_results(result: BacktestResult, backtester: PortfolioBackte
         )
         
         st.plotly_chart(fig2, use_container_width=True)
-    
-    # 4. 연간 요약 테이블
+
+    # 4. 구성 종목별 성과
+    st.subheader("구성 종목별 성과")
+    display_etf_performance(backtester)
+
+    # 5. 연간 요약 테이블
     st.subheader("연간 성과 요약")
     
     annual_df = backtester.get_annual_summary_df(result)
@@ -439,7 +583,7 @@ def display_backtest_results(result: BacktestResult, backtester: PortfolioBackte
 
         st.dataframe(display_df, use_container_width=True, hide_index=True)
     
-    # 5. 인출금 vs 배당금 비교
+    # 6. 인출금 vs 배당금 비교
     st.subheader("인출금 vs 배당금")
     
     col1, col2 = st.columns(2)
@@ -506,7 +650,7 @@ def display_backtest_results(result: BacktestResult, backtester: PortfolioBackte
             
             st.plotly_chart(fig4, use_container_width=True)
     
-    # 6. 세금 요약
+    # 7. 세금 요약
     st.subheader("세금 요약")
     
     col1, col2, col3 = st.columns(3)
@@ -545,7 +689,7 @@ def display_backtest_results(result: BacktestResult, backtester: PortfolioBackte
         
         st.plotly_chart(fig5, use_container_width=True)
     
-    # 7. 상세 로그 (펼쳐보기)
+    # 8. 상세 로그 (펼쳐보기)
     with st.expander("상세 리밸런싱 로그"):
         if result.rebalance_events:
             for event in result.rebalance_events[:10]:  # 최근 10개만
