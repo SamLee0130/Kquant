@@ -13,8 +13,14 @@ from datetime import datetime, timedelta
 import logging
 
 from .tax_calculator import TaxCalculator
+from config.settings import BACKTEST_CONSTANTS
 
 logger = logging.getLogger(__name__)
+
+# 상수 로드
+SNAPSHOT_THRESHOLD_DAY = BACKTEST_CONSTANTS["snapshot_threshold_day"]
+RISK_FREE_RATE = BACKTEST_CONSTANTS["risk_free_rate"]
+VOLATILITY_ANNUALIZATION = BACKTEST_CONSTANTS["volatility_annualization"]
 
 
 @dataclass
@@ -412,44 +418,178 @@ class PortfolioBacktester:
     
     def _apply_deferred_tax(self, year: int) -> float:
         """이연된 양도소득세 차감 (1월)
-        
+
         전년도 양도소득세를 포트폴리오에서 현금으로 차감합니다.
         현금이 부족하면 비례 매도합니다.
         """
         tax = self.tax_calculator.get_deferred_tax(year)
         if tax <= 0:
             return 0.0
-        
+
         # 현금에서 우선 차감
         if self.cash >= tax:
             self.cash -= tax
             return tax
-        
+
         # 부족분은 포트폴리오에서 매도
         from_cash = self.cash
         remaining = tax - from_cash
         self.cash = 0
-        
+
         date = pd.Timestamp(year=year, month=1, day=15)  # 1월 중순 가정
-        
+
         for symbol, shares in list(self.holdings.items()):
             if remaining <= 0:
                 break
-            
+
             price = self._get_price(symbol, date)
             if not price or shares <= 0:
                 continue
-            
+
             weight = self.allocation.get(symbol, 0)
             sell_value = remaining * weight
             sell_shares = min(sell_value / price, shares)
-            
+
             if sell_shares > 0:
                 self.holdings[symbol] -= sell_shares
                 remaining -= sell_shares * price
-        
+
         return tax
-    
+
+    def _setup_dates(
+        self,
+        start_date: Optional[datetime],
+        end_date: Optional[datetime],
+        years: int
+    ) -> tuple[pd.Timestamp, pd.Timestamp]:
+        """백테스트 시작/종료 날짜 설정
+
+        Returns:
+            (start_date, end_date) as tz-naive Timestamps
+        """
+        now = datetime.now()
+
+        if end_date is None:
+            current_quarter_month = ((now.month - 1) // 3) * 3 + 1
+            end_date = datetime(now.year, current_quarter_month, 1)
+
+        if start_date is None:
+            start_year = end_date.year - years
+            start_date = datetime(start_year, 1, 1)
+
+        # 타임존 혼합 방지: tz-naive로 통일
+        start_ts = pd.Timestamp(start_date)
+        start_ts = start_ts.tz_convert(None) if start_ts.tz is not None else start_ts.tz_localize(None)
+        end_ts = pd.Timestamp(end_date)
+        end_ts = end_ts.tz_convert(None) if end_ts.tz is not None else end_ts.tz_localize(None)
+
+        return start_ts, end_ts
+
+    def _initialize_state(self) -> None:
+        """백테스트 상태 초기화"""
+        self.holdings = {}
+        self.cost_basis = {}
+        self.cash = self.initial_capital
+        self.tax_calculator.reset()
+        self.rebalance_events = []
+        self.withdrawal_events = []
+        self.dividend_events = []
+        self.total_transaction_cost = 0.0
+
+    def _create_empty_result(self) -> BacktestResult:
+        """리밸런싱 날짜가 없을 때 빈 결과 반환"""
+        return BacktestResult(
+            portfolio_history=[],
+            rebalance_events=[],
+            withdrawal_events=[],
+            dividend_events=[],
+            tax_events=[],
+            initial_value=self.initial_capital,
+            final_value=self.initial_capital,
+            total_return=0.0,
+            cagr=0.0,
+            volatility=0.0,
+            sharpe_ratio=0.0,
+            max_drawdown=0.0,
+            total_withdrawal=0.0,
+            total_dividend_gross=0.0,
+            total_dividend_net=0.0,
+            total_tax=0.0,
+            total_transaction_cost=0.0
+        )
+
+    def _calculate_metrics(
+        self,
+        portfolio_history: List[PortfolioSnapshot],
+        start_date: pd.Timestamp,
+        end_date: pd.Timestamp,
+        final_value: float
+    ) -> Dict[str, float]:
+        """성과 지표 계산
+
+        Returns:
+            Dict containing total_return, cagr, volatility, sharpe_ratio, max_drawdown
+        """
+        values = [s.total_value for s in portfolio_history]
+        returns = pd.Series(values).pct_change().dropna()
+
+        total_return = (final_value / self.initial_capital - 1) * 100
+
+        # CAGR 계산
+        years_elapsed = (end_date - start_date).days / 365.25
+        cagr = ((final_value / self.initial_capital) ** (1 / years_elapsed) - 1) * 100 if years_elapsed > 0 else 0
+
+        # 변동성 (연율화)
+        volatility = returns.std() * VOLATILITY_ANNUALIZATION * 100
+
+        # 샤프비율
+        excess_return = (cagr / 100) - RISK_FREE_RATE
+        sharpe_ratio = excess_return / (volatility / 100) if volatility > 0 else 0
+
+        # 최대 낙폭
+        cummax = pd.Series(values).cummax()
+        drawdown = (pd.Series(values) - cummax) / cummax
+        max_drawdown = drawdown.min() * 100
+
+        return {
+            'total_return': total_return,
+            'cagr': cagr,
+            'volatility': volatility,
+            'sharpe_ratio': sharpe_ratio,
+            'max_drawdown': max_drawdown
+        }
+
+    def _create_result(
+        self,
+        portfolio_history: List[PortfolioSnapshot],
+        final_value: float,
+        cumulative_withdrawal: float,
+        metrics: Dict[str, float]
+    ) -> BacktestResult:
+        """최종 BacktestResult 생성"""
+        total_dividend_gross = sum(e['gross_dividend'] for e in self.dividend_events)
+        total_dividend_net = sum(e['net_dividend'] for e in self.dividend_events)
+
+        return BacktestResult(
+            portfolio_history=portfolio_history,
+            rebalance_events=self.rebalance_events,
+            withdrawal_events=self.withdrawal_events,
+            dividend_events=self.dividend_events,
+            tax_events=self.tax_calculator.tax_history,
+            initial_value=self.initial_capital,
+            final_value=final_value,
+            total_return=metrics['total_return'],
+            cagr=metrics['cagr'],
+            volatility=metrics['volatility'],
+            sharpe_ratio=metrics['sharpe_ratio'],
+            max_drawdown=metrics['max_drawdown'],
+            total_withdrawal=cumulative_withdrawal,
+            total_dividend_gross=total_dividend_gross,
+            total_dividend_net=total_dividend_net,
+            total_tax=self.tax_calculator.get_total_tax(),
+            total_transaction_cost=self.total_transaction_cost
+        )
+
     def run(
         self,
         start_date: datetime = None,
@@ -466,287 +606,196 @@ class PortfolioBacktester:
         Returns:
             백테스트 결과
         """
-        # 날짜 설정
-        now = datetime.now()
-
-        if end_date is None:
-            # 현재 날짜 기준 가장 최근 분기 시작일 (1월, 4월, 7월, 10월 1일)
-            current_quarter_month = ((now.month - 1) // 3) * 3 + 1
-            end_date = datetime(now.year, current_quarter_month, 1)
-
-        if start_date is None:
-            # N년 전 1월 1일
-            start_year = end_date.year - years
-            start_date = datetime(start_year, 1, 1)
-
-        # 타임존 혼합 방지: tz-naive로 통일
-        start_date = pd.Timestamp(start_date)
-        start_date = start_date.tz_convert(None) if start_date.tz is not None else start_date.tz_localize(None)
-        end_date = pd.Timestamp(end_date)
-        end_date = end_date.tz_convert(None) if end_date.tz is not None else end_date.tz_localize(None)
-        
+        # 날짜 설정 및 초기화
+        start_date, end_date = self._setup_dates(start_date, end_date, years)
         logger.info(f"백테스트 기간: {start_date.date()} ~ {end_date.date()}")
-        
-        # 데이터 수집
+
         symbols = list(self.allocation.keys())
         self._fetch_data(symbols, start_date, end_date)
-        
-        # 초기화
-        self.holdings = {}
-        self.cost_basis = {}
-        self.cash = self.initial_capital
-        self.tax_calculator.reset()
-        self.rebalance_events = []
-        self.withdrawal_events = []
-        self.dividend_events = []
-        self.total_transaction_cost = 0.0
-        
+        self._initialize_state()
+
         # 리밸런싱 날짜 생성
         rebalance_dates = self._get_rebalance_dates(start_date, end_date)
-        
-        # 포트폴리오 히스토리
+        if not rebalance_dates:
+            return self._create_empty_result()
+
+        # 시뮬레이션 상태
         portfolio_history: List[PortfolioSnapshot] = []
-        
-        # 누적 값
         cumulative_withdrawal = 0.0
         cumulative_dividend = 0.0
         cumulative_tax = 0.0
+        last_dividend_processed_date = start_date
 
-        # 배당 계산 구간 시작일 (이전 리밸런싱 이후 누적)
-        last_dividend_processed_date = pd.Timestamp(start_date)
-        
         # 시작 시점 스냅샷 (거래 전, 현금 100%)
-        start_prices = {s: self._get_price(s, pd.Timestamp(start_date)) for s in symbols}
-        start_total_value = self._get_portfolio_value(pd.Timestamp(start_date))
         portfolio_history.append(PortfolioSnapshot(
-            date=pd.Timestamp(start_date),
+            date=start_date,
             holdings=dict(self.holdings),
-            prices=start_prices,
+            prices={s: self._get_price(s, start_date) for s in symbols},
             cash=self.cash,
-            total_value=start_total_value,
+            total_value=self._get_portfolio_value(start_date),
             cumulative_withdrawal=cumulative_withdrawal,
             cumulative_dividend=cumulative_dividend,
             cumulative_tax=cumulative_tax
         ))
 
-        # 초기에는 현금만 보유; 첫 리밸런싱까지 매수하지 않음
-        if not rebalance_dates:
-            return BacktestResult(
-                portfolio_history=[],
-                rebalance_events=[],
-                withdrawal_events=[],
-                dividend_events=[],
-                tax_events=[],
-                initial_value=self.initial_capital,
-                final_value=self.initial_capital,
-                total_return=0.0,
-                cagr=0.0,
-                volatility=0.0,
-                sharpe_ratio=0.0,
-                max_drawdown=0.0,
-                total_withdrawal=0.0,
-                total_dividend_gross=0.0,
-                total_dividend_net=0.0,
-                total_tax=0.0,
-                total_transaction_cost=0.0
-            )
-        
-        # 모든 거래일 순회
+        # 거래일 순회
         all_dates = self._price_data[symbols[0]].index
         prev_rebalance_date = None
         prev_year = None
         initial_invested = False
-        
+
         for date in all_dates:
             current_year = date.year
-            
+
             # 연초 양도소득세 납부 (1월)
             if prev_year is not None and current_year != prev_year:
-                tax = self._apply_deferred_tax(current_year)
-                cumulative_tax += tax
-            
-            # 리밸런싱 날짜인지 확인
+                cumulative_tax += self._apply_deferred_tax(current_year)
+
+            # 리밸런싱 날짜 확인
             is_rebalance_date = False
             for rb_date in rebalance_dates:
                 if date >= rb_date and (prev_rebalance_date is None or rb_date > prev_rebalance_date):
                     is_rebalance_date = True
                     prev_rebalance_date = rb_date
                     break
-            
-            # 리밸런싱 시점에 처리 (초기 매수 포함)
-            if is_rebalance_date and prev_rebalance_date is not None:
-                # 첫 리밸런싱에서 초기 매수 수행
-                if not initial_invested:
-                    total_invested = 0.0
-                    initial_trades = []
-                    for symbol, weight in self.allocation.items():
-                        price = self._get_price(symbol, date)
-                        if price:
-                            value = self.initial_capital * weight
-                            shares = value / price
-                            self.holdings[symbol] = shares
-                            self.cost_basis[symbol] = price
-                            total_invested += value
-                            initial_trades.append({
-                                'symbol': symbol,
-                                'shares': shares,
-                                'price': price,
-                                'value': value,
-                                'transaction_cost': 0.0,
-                                'current_shares': 0.0,
-                                'target_shares': shares
-                            })
-                    self.cash = self.initial_capital - total_invested
-                    initial_invested = True
 
-                    # 초기 매수 이벤트 기록
-                    self.rebalance_events.append({
-                        'date': date,
-                        'portfolio_value': self.initial_capital,
-                        'trades': initial_trades,
-                        'capital_gain': 0.0,
-                        'transaction_cost': 0.0,
-                        'is_initial_purchase': True
-                    })
-                
-                # 이전 리밸런싱 이후부터 이번 리밸런싱 시점까지 배당금 처리
+            # 리밸런싱 시점 처리
+            if is_rebalance_date and prev_rebalance_date is not None:
+                # 첫 리밸런싱에서 초기 매수
+                if not initial_invested:
+                    initial_invested = self._execute_initial_purchase(date)
+
+                # 배당금 처리
                 dividend_cash = self._process_dividends(last_dividend_processed_date, date)
                 cumulative_dividend += dividend_cash
                 last_dividend_processed_date = date
-                
-                # 인출 처리
+
+                # 인출 및 리밸런싱
                 withdrawal_event = self._process_withdrawal(date, dividend_cash)
                 cumulative_withdrawal += withdrawal_event['total_withdrawal']
-                
-                # 리밸런싱
                 self._rebalance(date)
-            
+
             # 연말 양도소득세 정산
             if prev_year is not None and current_year != prev_year:
                 self._process_year_end_tax(prev_year, date)
-            
+
             prev_year = current_year
-            
-            # 스냅샷 저장 (월별)
-            if date.day <= 7:  # 매월 초에 스냅샷
-                prices = {s: self._get_price(s, date) for s in symbols}
-                total_value = self._get_portfolio_value(date)
-                
-                snapshot = PortfolioSnapshot(
+
+            # 월별 스냅샷 저장
+            if date.day <= SNAPSHOT_THRESHOLD_DAY:
+                portfolio_history.append(PortfolioSnapshot(
                     date=date,
                     holdings=dict(self.holdings),
-                    prices=prices,
+                    prices={s: self._get_price(s, date) for s in symbols},
                     cash=self.cash,
-                    total_value=total_value,
+                    total_value=self._get_portfolio_value(date),
                     cumulative_withdrawal=cumulative_withdrawal,
                     cumulative_dividend=cumulative_dividend,
                     cumulative_tax=cumulative_tax
-                )
-                portfolio_history.append(snapshot)
-        
-        # 종료일이 리밸런싱 날짜인 경우 마지막 리밸런싱 처리 (휴장일인 경우 루프에서 처리되지 않음)
-        final_end_date = pd.Timestamp(end_date)
-        if final_end_date in rebalance_dates and prev_rebalance_date != final_end_date:
-            # 연초 양도소득세 납부 (이전 연도와 다른 경우)
-            if prev_year is not None and final_end_date.year != prev_year:
-                tax = self._apply_deferred_tax(final_end_date.year)
-                cumulative_tax += tax
+                ))
 
-            # 배당금 처리
-            dividend_cash = self._process_dividends(last_dividend_processed_date, final_end_date)
-            cumulative_dividend += dividend_cash
-            last_dividend_processed_date = final_end_date
+        # 종료일 처리 (휴장일인 경우)
+        cumulative_withdrawal, cumulative_dividend, cumulative_tax, prev_year = self._process_final_date(
+            end_date, rebalance_dates, prev_rebalance_date, prev_year,
+            last_dividend_processed_date, cumulative_withdrawal, cumulative_dividend, cumulative_tax
+        )
 
-            # 인출 처리
-            withdrawal_event = self._process_withdrawal(final_end_date, dividend_cash)
-            cumulative_withdrawal += withdrawal_event['total_withdrawal']
-
-            # 리밸런싱
-            self._rebalance(final_end_date)
-
-            # 연말 세금 정산 (이전 연도와 다른 경우)
-            if prev_year is not None and final_end_date.year != prev_year:
-                self._process_year_end_tax(prev_year, final_end_date)
-
-            prev_year = final_end_date.year
-            prev_rebalance_date = final_end_date
-
-        # 마지막 배당금 처리 (마지막 리밸런싱 이후 ~ 종료일)
-        final_dividend = self._process_dividends(last_dividend_processed_date, pd.Timestamp(end_date))
-        cumulative_dividend += final_dividend
-
-        # 마지막 연도 세금 정산
-        if prev_year:
-            self._process_year_end_tax(prev_year, pd.Timestamp(end_date))
-            # 마지막 연도의 양도소득세는 다음 해 1월에 차감되므로, 시뮬레이션 종료 시점에 미리 차감
-            final_capital_tax = self._apply_deferred_tax(prev_year + 1)
-            cumulative_tax += final_capital_tax
-        
         # 최종 스냅샷
-        final_date = pd.Timestamp(end_date)
-        final_prices = {s: self._get_price(s, final_date) for s in symbols}
-        final_value = self._get_portfolio_value(final_date)
-        
-        final_snapshot = PortfolioSnapshot(
-            date=final_date,
+        final_value = self._get_portfolio_value(end_date)
+        portfolio_history.append(PortfolioSnapshot(
+            date=end_date,
             holdings=dict(self.holdings),
-            prices=final_prices,
+            prices={s: self._get_price(s, end_date) for s in symbols},
             cash=self.cash,
             total_value=final_value,
             cumulative_withdrawal=cumulative_withdrawal,
             cumulative_dividend=cumulative_dividend,
             cumulative_tax=self.tax_calculator.get_total_tax()
-        )
-        portfolio_history.append(final_snapshot)
-        
-        # 성과 지표 계산
-        values = [s.total_value for s in portfolio_history]
-        returns = pd.Series(values).pct_change().dropna()
-        
-        total_return = (final_value / self.initial_capital - 1) * 100
-        
-        # CAGR 계산
-        years_elapsed = (end_date - start_date).days / 365.25
-        cagr = ((final_value / self.initial_capital) ** (1 / years_elapsed) - 1) * 100 if years_elapsed > 0 else 0
-        
-        # 변동성 (연율화)
-        volatility = returns.std() * np.sqrt(12) * 100  # 월별 데이터 기준
-        
-        # 샤프비율 (무위험수익률 3% 가정)
-        risk_free_rate = 0.03
-        excess_return = (cagr / 100) - risk_free_rate
-        sharpe_ratio = excess_return / (volatility / 100) if volatility > 0 else 0
-        
-        # 최대 낙폭
-        cummax = pd.Series(values).cummax()
-        drawdown = (pd.Series(values) - cummax) / cummax
-        max_drawdown = drawdown.min() * 100
-        
-        # 배당금 총계
-        total_dividend_gross = sum(e['gross_dividend'] for e in self.dividend_events)
-        total_dividend_net = sum(e['net_dividend'] for e in self.dividend_events)
-        
-        result = BacktestResult(
-            portfolio_history=portfolio_history,
-            rebalance_events=self.rebalance_events,
-            withdrawal_events=self.withdrawal_events,
-            dividend_events=self.dividend_events,
-            tax_events=self.tax_calculator.tax_history,
-            initial_value=self.initial_capital,
-            final_value=final_value,
-            total_return=total_return,
-            cagr=cagr,
-            volatility=volatility,
-            sharpe_ratio=sharpe_ratio,
-            max_drawdown=max_drawdown,
-            total_withdrawal=cumulative_withdrawal,
-            total_dividend_gross=total_dividend_gross,
-            total_dividend_net=total_dividend_net,
-            total_tax=self.tax_calculator.get_total_tax(),
-            total_transaction_cost=self.total_transaction_cost
-        )
-        
-        return result
+        ))
+
+        # 성과 지표 계산 및 결과 반환
+        metrics = self._calculate_metrics(portfolio_history, start_date, end_date, final_value)
+        return self._create_result(portfolio_history, final_value, cumulative_withdrawal, metrics)
+
+    def _execute_initial_purchase(self, date: pd.Timestamp) -> bool:
+        """초기 매수 실행"""
+        total_invested = 0.0
+        initial_trades = []
+
+        for symbol, weight in self.allocation.items():
+            price = self._get_price(symbol, date)
+            if price:
+                value = self.initial_capital * weight
+                shares = value / price
+                self.holdings[symbol] = shares
+                self.cost_basis[symbol] = price
+                total_invested += value
+                initial_trades.append({
+                    'symbol': symbol,
+                    'shares': shares,
+                    'price': price,
+                    'value': value,
+                    'transaction_cost': 0.0,
+                    'current_shares': 0.0,
+                    'target_shares': shares
+                })
+
+        self.cash = self.initial_capital - total_invested
+
+        self.rebalance_events.append({
+            'date': date,
+            'portfolio_value': self.initial_capital,
+            'trades': initial_trades,
+            'capital_gain': 0.0,
+            'transaction_cost': 0.0,
+            'is_initial_purchase': True
+        })
+
+        return True
+
+    def _process_final_date(
+        self,
+        end_date: pd.Timestamp,
+        rebalance_dates: List[pd.Timestamp],
+        prev_rebalance_date: Optional[pd.Timestamp],
+        prev_year: Optional[int],
+        last_dividend_processed_date: pd.Timestamp,
+        cumulative_withdrawal: float,
+        cumulative_dividend: float,
+        cumulative_tax: float
+    ) -> tuple[float, float, float, Optional[int]]:
+        """종료일 처리 (휴장일인 경우 마지막 리밸런싱 처리)"""
+        if end_date in rebalance_dates and prev_rebalance_date != end_date:
+            # 연초 양도소득세 납부
+            if prev_year is not None and end_date.year != prev_year:
+                cumulative_tax += self._apply_deferred_tax(end_date.year)
+
+            # 배당금 처리
+            dividend_cash = self._process_dividends(last_dividend_processed_date, end_date)
+            cumulative_dividend += dividend_cash
+            last_dividend_processed_date = end_date
+
+            # 인출 및 리밸런싱
+            withdrawal_event = self._process_withdrawal(end_date, dividend_cash)
+            cumulative_withdrawal += withdrawal_event['total_withdrawal']
+            self._rebalance(end_date)
+
+            # 연말 세금 정산
+            if prev_year is not None and end_date.year != prev_year:
+                self._process_year_end_tax(prev_year, end_date)
+
+            prev_year = end_date.year
+
+        # 마지막 배당금 처리
+        final_dividend = self._process_dividends(last_dividend_processed_date, end_date)
+        cumulative_dividend += final_dividend
+
+        # 마지막 연도 세금 정산
+        if prev_year:
+            self._process_year_end_tax(prev_year, end_date)
+            cumulative_tax += self._apply_deferred_tax(prev_year + 1)
+
+        return cumulative_withdrawal, cumulative_dividend, cumulative_tax, prev_year
     
     def get_portfolio_history_df(self, result: BacktestResult) -> pd.DataFrame:
         """포트폴리오 히스토리 DataFrame 반환"""

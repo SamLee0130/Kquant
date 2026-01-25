@@ -1,6 +1,14 @@
 """
 Kquant 프로젝트 설정 파일
 """
+import numpy as np
+
+# 백테스트 엔진 상수
+BACKTEST_CONSTANTS = {
+    "snapshot_threshold_day": 7,           # 월별 스냅샷 저장 기준일 (매월 N일 이전)
+    "risk_free_rate": 0.03,                # 무위험수익률 (샤프비율 계산용)
+    "volatility_annualization": np.sqrt(12),  # 월별 데이터 연율화 팩터
+}
 
 # 스트림릿 대시보드 설정
 STREAMLIT_CONFIG = {
