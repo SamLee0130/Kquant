@@ -11,6 +11,7 @@ from typing import List, Dict, Optional
 import logging
 
 from src.backtest.portfolio_backtest import PortfolioBacktester, BacktestResult
+from src.dashboard.sidebar_utils import render_common_sidebar
 from config.settings import ETF_BACKTEST_DEFAULTS
 
 logger = logging.getLogger(__name__)
@@ -27,77 +28,16 @@ def show_portfolio_comparison_page():
     
     # 사이드바 - 공통 설정
     with st.sidebar:
-        st.subheader("공통 설정")
-        
-        initial_capital = st.number_input(
-            "초기 자본 (USD)",
-            min_value=10_000,
-            max_value=100_000_000,
-            value=ETF_BACKTEST_DEFAULTS['initial_capital'],
-            step=100_000,
-            format="%d",
-            key="compare_initial_capital"
-        )
-        
-        backtest_years = st.number_input(
-            "백테스팅 기간 (년)",
-            min_value=1,
-            max_value=30,
-            value=ETF_BACKTEST_DEFAULTS['backtest_years'],
-            step=1,
-            key="compare_backtest_years"
-        )
-        
-        rebalance_freq = st.selectbox(
-            "리밸런싱 주기",
-            options=['quarterly', 'yearly'],
-            index=0 if ETF_BACKTEST_DEFAULTS['rebalance_frequency'] == 'quarterly' else 1,
-            format_func=lambda x: '분기별' if x == 'quarterly' else '연간',
-            key="compare_rebalance_freq"
-        )
-        
-        withdrawal_rate = st.number_input(
-            "연간 인출률 (%)",
-            min_value=0.0,
-            max_value=20.0,
-            value=ETF_BACKTEST_DEFAULTS['withdrawal_rate'] * 100,
-            step=0.5,
-            key="compare_withdrawal_rate"
-        ) / 100
-        
-        st.markdown("---")
-        st.subheader("세금 설정")
-        
-        dividend_tax_rate = st.number_input(
-            "배당소득세 (%)",
-            min_value=0.0,
-            max_value=50.0,
-            value=ETF_BACKTEST_DEFAULTS['dividend_tax_rate'] * 100,
-            step=1.0,
-            key="compare_dividend_tax"
-        ) / 100
-        
-        capital_gains_tax_rate = st.number_input(
-            "양도소득세 (%)",
-            min_value=0.0,
-            max_value=50.0,
-            value=ETF_BACKTEST_DEFAULTS['capital_gains_tax_rate'] * 100,
-            step=1.0,
-            key="compare_capital_gains_tax"
-        ) / 100
-        
-        st.markdown("---")
-        st.subheader("거래비용 설정")
-        
-        transaction_cost_rate = st.number_input(
-            "거래비용 (%)",
-            min_value=0.0,
-            max_value=2.0,
-            value=ETF_BACKTEST_DEFAULTS['transaction_cost_rate'] * 100,
-            step=0.05,
-            key="compare_transaction_cost",
-            help="거래수수료 + 슬리피지 (거래금액의 %)"
-        ) / 100
+        settings = render_common_sidebar(key_prefix="compare_")
+
+    # 설정값 추출
+    initial_capital = settings.initial_capital
+    backtest_years = settings.backtest_years
+    rebalance_freq = settings.rebalance_freq
+    withdrawal_rate = settings.withdrawal_rate
+    dividend_tax_rate = settings.dividend_tax_rate
+    capital_gains_tax_rate = settings.capital_gains_tax_rate
+    transaction_cost_rate = settings.transaction_cost_rate
     
     # 포트폴리오 추가 활성화 여부 (메인 영역 상단)
     col_check1, col_check2, col_check3 = st.columns(3)
