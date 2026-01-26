@@ -1,5 +1,7 @@
 # CLAUDE.md
 
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
 ETF 포트폴리오 백테스트 대시보드 - 한국 세금 규정을 반영한 투자 전략 시뮬레이션 도구
 
 ## 핵심 기능
@@ -14,14 +16,15 @@ ETF 포트폴리오 백테스트 대시보드 - 한국 세금 규정을 반영�
 
 ```bash
 # 환경 설정
-git clone https://github.com/SamLee0130/Kquant.git
-cd Kquant
 python -m venv venv
 source venv/bin/activate         # Windows: venv\Scripts\activate
 pip install -r requirements.txt
 
 # 실행
 streamlit run app.py             # localhost:8501
+
+# 테스트
+./venv/bin/python -m pytest tests/ -v
 ```
 
 ## 아키텍처
@@ -31,13 +34,14 @@ streamlit run app.py             # localhost:8501
 ```
 Kquant/
 ├── app.py                         # 진입점
-├── config/settings.py             # 기본값 (자본금, 세율, ETF 배분)
+├── config/settings.py             # 기본값, 상수 (BACKTEST_CONSTANTS, ETF_BACKTEST_DEFAULTS)
 └── src/
     ├── backtest/
     │   ├── portfolio_backtest.py  # 핵심 시뮬레이션 엔진
     │   └── tax_calculator.py      # 세금 계산 모듈
     └── dashboard/
         ├── main_app.py                  # 페이지 라우팅
+        ├── sidebar_utils.py             # 공통 사이드바 설정 (BacktestSettings)
         ├── allocation_backtest_page.py  # 단일 포트폴리오 백테스트
         └── portfolio_comparison_page.py # 포트폴리오 비교 (최대 5개)
 ```
