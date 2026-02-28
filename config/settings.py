@@ -8,6 +8,14 @@ BACKTEST_CONSTANTS = {
     "snapshot_threshold_day": 7,           # 월별 스냅샷 저장 기준일 (매월 N일 이전)
     "risk_free_rate": 0.03,                # 무위험수익률 (샤프비율 계산용)
     "volatility_annualization": np.sqrt(12),  # 월별 데이터 연율화 팩터
+    "min_trade_value": 1.0,          # 최소 거래 금액 ($1 이상 차이 시 거래)
+    "min_data_days": 252,            # 최소 데이터 일수 (약 1년)
+}
+
+# 대시보드 상수
+DASHBOARD_CONSTANTS = {
+    "max_comparison_portfolios": 5,   # 비교 페이지 최대 포트폴리오 수
+    "max_optimization_etfs": 10,      # 최적화 최대 ETF 수
 }
 
 # 스트림릿 대시보드 설정

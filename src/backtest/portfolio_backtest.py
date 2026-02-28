@@ -14,6 +14,7 @@ import logging
 
 from .tax_calculator import TaxCalculator
 from config.settings import BACKTEST_CONSTANTS
+from src.data.data_fetcher import fetch_price_data, fetch_dividend_data
 
 logger = logging.getLogger(__name__)
 
@@ -21,6 +22,7 @@ logger = logging.getLogger(__name__)
 SNAPSHOT_THRESHOLD_DAY = BACKTEST_CONSTANTS["snapshot_threshold_day"]
 RISK_FREE_RATE = BACKTEST_CONSTANTS["risk_free_rate"]
 VOLATILITY_ANNUALIZATION = BACKTEST_CONSTANTS["volatility_annualization"]
+MIN_TRADE_VALUE = BACKTEST_CONSTANTS["min_trade_value"]
 
 
 @dataclass
@@ -124,41 +126,17 @@ class PortfolioBacktester:
         self.total_transaction_cost: float = 0.0
         
     def _fetch_data(self, symbols: List[str], start_date: datetime, end_date: datetime) -> None:
-        """yfinance로 가격 및 배당금 데이터 수집"""
-        # 비교 기준 날짜를 tz-naive로 통일
-        start_ts = pd.Timestamp(start_date)
-        start_ts = start_ts.tz_convert(None) if start_ts.tz is not None else start_ts.tz_localize(None)
-        end_ts = pd.Timestamp(end_date)
-        end_ts = end_ts.tz_convert(None) if end_ts.tz is not None else end_ts.tz_localize(None)
+        """yfinance로 가격 및 배당금 데이터 수집 (캐싱 레이어 사용)"""
+        start_str = str(start_date.date()) if hasattr(start_date, 'date') else str(start_date)
+        end_str = str(end_date.date()) if hasattr(end_date, 'date') else str(end_date)
 
         for symbol in symbols:
             logger.info(f"{symbol} 데이터 수집 중...")
-            ticker = yf.Ticker(symbol)
-            
-            # 가격 데이터
-            hist = ticker.history(start=start_date, end=end_date, auto_adjust=False)
-            if hist.empty:
-                raise ValueError(f"{symbol} 가격 데이터를 찾을 수 없습니다.")
-            
-            # 타임존 제거 (timezone-naive로 변환)
-            hist.index = pd.DatetimeIndex(hist.index)
-            if hist.index.tz is not None:
-                hist.index = hist.index.tz_convert(None)
-            
-            self._price_data[symbol] = hist[['Close']].copy()
-            self._price_data[symbol].columns = ['price']
-            
-            # 배당금 데이터
-            dividends = ticker.dividends
-            if not dividends.empty:
-                dividends.index = pd.DatetimeIndex(dividends.index)
-                if dividends.index.tz is not None:
-                    dividends.index = dividends.index.tz_convert(None)
-                # 시작/종료일 기준 배당금만 필터링
-                dividends = dividends[(dividends.index >= start_ts) & (dividends.index <= end_ts)]
-            self._dividend_data[symbol] = dividends
-            
-            logger.info(f"{symbol}: {len(hist)} 거래일, {len(dividends)} 배당 이벤트")
+
+            self._price_data[symbol] = fetch_price_data(symbol, start_str, end_str)
+            self._dividend_data[symbol] = fetch_dividend_data(symbol, start_str, end_str)
+
+            logger.info(f"{symbol}: {len(self._price_data[symbol])} 거래일, {len(self._dividend_data[symbol])} 배당 이벤트")
     
     def _get_price(self, symbol: str, date: pd.Timestamp) -> Optional[float]:
         """특정 날짜의 가격 조회 (없으면 직후 거래일 종가 우선, 그다음 직전)"""
@@ -252,7 +230,7 @@ class PortfolioBacktester:
             target_value = total_value * target_weight
             diff_value = target_value - current_value
             
-            if abs(diff_value) > 1:  # $1 이상 차이가 있을 때만 거래
+            if abs(diff_value) > MIN_TRADE_VALUE:  # 최소 거래 금액 이상 차이가 있을 때만 거래
                 shares_to_trade = diff_value / price
                 traded_value = shares_to_trade * price  # 양수=매수, 음수=매도
                 

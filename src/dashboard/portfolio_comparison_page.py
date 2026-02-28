@@ -11,6 +11,7 @@ from typing import List, Dict, Optional
 import logging
 
 from src.backtest.portfolio_backtest import PortfolioBacktester, BacktestResult
+from src.backtest.backtest_utils import summarize_tax_events
 from src.dashboard.sidebar_utils import render_common_sidebar
 from config.settings import ETF_BACKTEST_DEFAULTS
 
@@ -269,26 +270,13 @@ def _render_portfolio_allocation(portfolio: dict, key_prefix: str) -> dict:
     return allocation
 
 
-def _display_comparison_results(
-    backtesters: List[PortfolioBacktester],
+def _render_summary_table(
     results: List[BacktestResult],
     allocations: List[Dict[str, float]],
-    initial_capital: float
+    num_portfolios: int
 ):
-    """비교 결과 표시 (2~5개 포트폴리오 지원)"""
-    
-    num_portfolios = len(results)
-    
-    st.markdown("---")
-    st.subheader("비교 결과")
-    
-    # 포트폴리오 이름 생성
-    names = [
-        " / ".join([f"{s} {w*100:.0f}%" for s, w in alloc.items()])
-        for alloc in allocations
-    ]
-    
-    # 1. 성과 요약 테이블
+    """성과 요약 테이블 렌더링"""
+
     st.markdown("### 성과 요약")
 
     summary_data = {
@@ -310,14 +298,9 @@ def _display_comparison_results(
 
     # 각 포트폴리오 결과 추가
     for i, result in enumerate(results):
-        dividend_tax = sum(
-            e.tax_amount for e in result.tax_events
-            if e.tax_type == 'dividend'
-        )
-        capital_gains_tax = sum(
-            e.tax_amount for e in result.tax_events
-            if e.tax_type == 'capital_gains'
-        )
+        tax_summary = summarize_tax_events(result.tax_events)
+        dividend_tax = tax_summary['dividend_tax']
+        capital_gains_tax = tax_summary['capital_gains_tax']
 
         summary_data[f"포트폴리오 {i+1}"] = [
             int(round(result.final_value)),
@@ -336,14 +319,12 @@ def _display_comparison_results(
 
     # 차이 컬럼 추가 (포트폴리오 1 기준)
     result_1 = results[0]
-    dividend_tax_1 = sum(e.tax_amount for e in result_1.tax_events if e.tax_type == 'dividend')
-    capital_tax_1 = sum(e.tax_amount for e in result_1.tax_events if e.tax_type == 'capital_gains')
+    tax_1 = summarize_tax_events(result_1.tax_events)
 
     # 포트폴리오 2~5에 대한 비교 컬럼 추가 (루프로 처리)
     for idx in range(1, num_portfolios):
         result_n = results[idx]
-        dividend_tax_n = sum(e.tax_amount for e in result_n.tax_events if e.tax_type == 'dividend')
-        capital_tax_n = sum(e.tax_amount for e in result_n.tax_events if e.tax_type == 'capital_gains')
+        tax_n = summarize_tax_events(result_n.tax_events)
 
         summary_data[f"1 vs {idx+1}"] = [
             int(round(result_1.final_value - result_n.final_value)),
@@ -355,32 +336,26 @@ def _display_comparison_results(
             int(round(result_1.total_withdrawal - result_n.total_withdrawal)),
             int(round(result_1.total_dividend_net - result_n.total_dividend_net)),
             int(round(result_1.total_tax - result_n.total_tax)),
-            int(round(dividend_tax_1 - dividend_tax_n)),
-            int(round(capital_tax_1 - capital_tax_n)),
+            int(round(tax_1['dividend_tax'] - tax_n['dividend_tax'])),
+            int(round(tax_1['capital_gains_tax'] - tax_n['capital_gains_tax'])),
             int(round(result_1.total_transaction_cost - result_n.total_transaction_cost))
         ]
 
     summary_df = pd.DataFrame(summary_data)
     st.dataframe(summary_df, use_container_width=True, hide_index=True)
-    
-    # 포트폴리오 구성 표시
-    cols = st.columns(num_portfolios)
-    for i, (col, name) in enumerate(zip(cols, names)):
-        with col:
-            st.caption(f"**포트폴리오 {i+1}:** {name}")
-    
-    # 히스토리 데이터프레임 생성
-    histories = [
-        backtester.get_portfolio_history_df(result)
-        for backtester, result in zip(backtesters, results)
-    ]
-    
-    # 2. 시계열 성과 추이 그래프
+
+
+def _render_portfolio_value_chart(
+    histories: List[pd.DataFrame],
+    initial_capital: float
+):
+    """포트폴리오 가치 추이 차트 렌더링"""
+
     st.markdown("---")
     st.markdown("### 포트폴리오 가치 추이")
-    
+
     fig = go.Figure()
-    
+
     for i, history in enumerate(histories):
         fig.add_trace(go.Scatter(
             x=history['date'],
@@ -389,7 +364,7 @@ def _display_comparison_results(
             name=f'포트폴리오 {i+1}',
             line=dict(color=PORTFOLIO_COLORS[i], width=2)
         ))
-    
+
     # 초기 자본 기준선
     fig.add_hline(
         y=initial_capital,
@@ -397,7 +372,7 @@ def _display_comparison_results(
         line_color="gray",
         annotation_text=f"초기 자본: ${initial_capital:,.0f}"
     )
-    
+
     fig.update_layout(
         title="포트폴리오 가치 비교",
         xaxis_title="날짜",
@@ -412,27 +387,33 @@ def _display_comparison_results(
             x=1
         )
     )
-    
+
     st.plotly_chart(fig, use_container_width=True)
-    
-    # 3. 수익률 차이 추이
+
+
+def _render_cumulative_returns_chart(
+    histories: List[pd.DataFrame],
+    initial_capital: float
+):
+    """누적 수익률 비교 차트 렌더링"""
+
     st.markdown("### 누적 수익률 비교")
-    
-    fig2 = go.Figure()
-    
+
+    fig = go.Figure()
+
     for i, history in enumerate(histories):
         returns = (history['total_value'] / initial_capital - 1) * 100
-        fig2.add_trace(go.Scatter(
+        fig.add_trace(go.Scatter(
             x=history['date'],
             y=returns,
             mode='lines',
             name=f'포트폴리오 {i+1}',
             line=dict(color=PORTFOLIO_COLORS[i], width=2)
         ))
-    
-    fig2.add_hline(y=0, line_dash="dash", line_color="gray")
-    
-    fig2.update_layout(
+
+    fig.add_hline(y=0, line_dash="dash", line_color="gray")
+
+    fig.update_layout(
         title="누적 수익률 비교",
         xaxis_title="날짜",
         yaxis_title="수익률 (%)",
@@ -446,30 +427,36 @@ def _display_comparison_results(
             x=1
         )
     )
-    
-    st.plotly_chart(fig2, use_container_width=True)
-    
-    # 4. 연간 성과 비교
+
+    st.plotly_chart(fig, use_container_width=True)
+
+
+def _render_annual_comparison_chart(
+    backtesters: List[PortfolioBacktester],
+    results: List[BacktestResult]
+):
+    """연간 성과 비교 차트 렌더링"""
+
     st.markdown("### 연간 성과 비교")
-    
+
     annual_summaries = [
         backtester.get_annual_summary_df(result)
         for backtester, result in zip(backtesters, results)
     ]
-    
+
     # 모든 연간 데이터가 있는지 확인
     if all(not annual.empty for annual in annual_summaries):
-        fig3 = go.Figure()
-        
+        fig = go.Figure()
+
         for i, annual in enumerate(annual_summaries):
-            fig3.add_trace(go.Bar(
+            fig.add_trace(go.Bar(
                 x=annual['year'],
                 y=annual['return_pct'],
                 name=f'포트폴리오 {i+1}',
                 marker_color=PORTFOLIO_COLORS[i]
             ))
-        
-        fig3.update_layout(
+
+        fig.update_layout(
             title="연간 수익률 비교",
             xaxis_title="연도",
             yaxis_title="수익률 (%)",
@@ -483,5 +470,43 @@ def _display_comparison_results(
                 x=1
             )
         )
-        
-        st.plotly_chart(fig3, use_container_width=True)
+
+        st.plotly_chart(fig, use_container_width=True)
+
+
+def _display_comparison_results(
+    backtesters: List[PortfolioBacktester],
+    results: List[BacktestResult],
+    allocations: List[Dict[str, float]],
+    initial_capital: float
+):
+    """비교 결과 표시 (2~5개 포트폴리오 지원)"""
+
+    num_portfolios = len(results)
+
+    st.markdown("---")
+    st.subheader("비교 결과")
+
+    # 포트폴리오 이름 생성
+    names = [
+        " / ".join([f"{s} {w*100:.0f}%" for s, w in alloc.items()])
+        for alloc in allocations
+    ]
+
+    _render_summary_table(results, allocations, num_portfolios)
+
+    # 포트폴리오 구성 표시
+    cols = st.columns(num_portfolios)
+    for i, (col, name) in enumerate(zip(cols, names)):
+        with col:
+            st.caption(f"**포트폴리오 {i+1}:** {name}")
+
+    # 히스토리 데이터프레임 생성
+    histories = [
+        backtester.get_portfolio_history_df(result)
+        for backtester, result in zip(backtesters, results)
+    ]
+
+    _render_portfolio_value_chart(histories, initial_capital)
+    _render_cumulative_returns_chart(histories, initial_capital)
+    _render_annual_comparison_chart(backtesters, results)

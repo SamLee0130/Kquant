@@ -26,6 +26,7 @@ data/*.db
 data/*.sqlite
 logs/
 *.log
+docs/
 
 # OS generated
 .DS_Store

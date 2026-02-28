@@ -13,6 +13,7 @@ from datetime import datetime, timedelta
 import logging
 
 from src.backtest.portfolio_backtest import PortfolioBacktester, BacktestResult
+from src.backtest.backtest_utils import summarize_tax_events
 from src.dashboard.sidebar_utils import render_common_sidebar
 from config.settings import ETF_BACKTEST_DEFAULTS
 
@@ -295,11 +296,8 @@ def show_allocation_backtest_page():
         )
 
 
-def display_backtest_results(result: BacktestResult, backtester: PortfolioBacktester):
-    """백테스트 결과 표시"""
-    
-    st.markdown("---")
-    st.subheader("백테스트 결과")
+def _render_performance_metrics(result: BacktestResult):
+    """주요 성과 지표 렌더링 (분석 기간 + 3행 메트릭)"""
 
     # 분석 기간 표시
     if result.portfolio_history:
@@ -307,9 +305,8 @@ def display_backtest_results(result: BacktestResult, backtester: PortfolioBackte
         end_date = result.portfolio_history[-1].date.strftime('%Y-%m-%d')
         st.markdown(f"**분석 기간**: {start_date} ~ {end_date}")
 
-    # 1. 주요 성과 지표
     st.markdown("**주요 성과 지표**")
-    
+
     # 1행: 최종 자산, 총 인출금, 총 배당금(세후)
     row1_col1, row1_col2, row1_col3 = st.columns(3)
     with row1_col1:
@@ -330,16 +327,11 @@ def display_backtest_results(result: BacktestResult, backtester: PortfolioBackte
             f"${result.total_dividend_net:,.0f}",
             help="수령한 총 배당금 (세후)"
         )
-    
+
     # 세금 분리 집계
-    dividend_tax = sum(
-        e.tax_amount for e in result.tax_events
-        if e.tax_type == 'dividend'
-    )
-    capital_gains_tax = sum(
-        e.tax_amount for e in result.tax_events
-        if e.tax_type == 'capital_gains'
-    )
+    tax_summary = summarize_tax_events(result.tax_events)
+    dividend_tax = tax_summary['dividend_tax']
+    capital_gains_tax = tax_summary['capital_gains_tax']
 
     # 2행: 총 세금, 총 세금(배당), 총 세금(양도), 총 거래비용
     row2_col1, row2_col2, row2_col3, row2_col4 = st.columns(4)
@@ -367,7 +359,7 @@ def display_backtest_results(result: BacktestResult, backtester: PortfolioBackte
             f"${result.total_transaction_cost:,.0f}",
             help="거래수수료 + 슬리피지"
         )
-    
+
     # 3행: CAGR, 변동성, 샤프비율, 최대 낙폭
     row3_col1, row3_col2, row3_col3, row3_col4 = st.columns(4)
     with row3_col1:
@@ -394,16 +386,15 @@ def display_backtest_results(result: BacktestResult, backtester: PortfolioBackte
             f"{result.max_drawdown:.1f}%",
             help="최고점 대비 최대 하락폭"
         )
-    
-    st.markdown("---")
-    
-    # 2. 포트폴리오 가치 추이 차트
+
+
+def _render_portfolio_chart(history_df: pd.DataFrame, result: BacktestResult):
+    """포트폴리오 가치 추이 차트 렌더링"""
+
     st.subheader("포트폴리오 가치 추이")
-    
-    history_df = backtester.get_portfolio_history_df(result)
-    
+
     fig = go.Figure()
-    
+
     # 포트폴리오 총 가치
     fig.add_trace(go.Scatter(
         x=history_df['date'],
@@ -412,7 +403,7 @@ def display_backtest_results(result: BacktestResult, backtester: PortfolioBackte
         name='포트폴리오 가치',
         line=dict(color='#1f77b4', width=2)
     ))
-    
+
     # 누적 인출금
     fig.add_trace(go.Scatter(
         x=history_df['date'],
@@ -421,7 +412,7 @@ def display_backtest_results(result: BacktestResult, backtester: PortfolioBackte
         name='누적 인출금',
         line=dict(color='#2ca02c', width=2, dash='dash')
     ))
-    
+
     # 초기 자본 기준선
     fig.add_hline(
         y=result.initial_value,
@@ -429,7 +420,7 @@ def display_backtest_results(result: BacktestResult, backtester: PortfolioBackte
         line_color="gray",
         annotation_text=f"초기 자본: ${result.initial_value:,.0f}"
     )
-    
+
     fig.update_layout(
         title="포트폴리오 가치 및 누적 인출금",
         xaxis_title="날짜",
@@ -444,23 +435,26 @@ def display_backtest_results(result: BacktestResult, backtester: PortfolioBackte
             x=1
         )
     )
-    
+
     st.plotly_chart(fig, use_container_width=True)
-    
-    # 3. 자산별 비중 변화 (Stacked Area)
+
+
+def _render_allocation_chart(history_df: pd.DataFrame):
+    """자산별 비중 변화 (Stacked Area) 차트 렌더링"""
+
     st.subheader("자산별 비중 변화")
-    
+
     # 자산별 가치 컬럼 찾기 (total 제외)
     value_cols = [col for col in history_df.columns if col.endswith('_value') and col != 'total_value']
     symbols = [col.replace('_value', '') for col in value_cols]
-    
+
     if value_cols:
-        fig2 = go.Figure()
-        
+        fig = go.Figure()
+
         colors = px.colors.qualitative.Set2
-        
+
         for i, (symbol, col) in enumerate(zip(symbols, value_cols)):
-            fig2.add_trace(go.Scatter(
+            fig.add_trace(go.Scatter(
                 x=history_df['date'],
                 y=history_df[col],
                 mode='lines',
@@ -469,8 +463,8 @@ def display_backtest_results(result: BacktestResult, backtester: PortfolioBackte
                 line=dict(width=0),
                 fillcolor=colors[i % len(colors)]
             ))
-        
-        fig2.update_layout(
+
+        fig.update_layout(
             title="자산별 가치 변화",
             xaxis_title="날짜",
             yaxis_title="금액 (USD)",
@@ -484,18 +478,15 @@ def display_backtest_results(result: BacktestResult, backtester: PortfolioBackte
                 x=1
             )
         )
-        
-        st.plotly_chart(fig2, use_container_width=True)
 
-    # 4. 구성 종목별 성과
-    st.subheader("구성 종목별 성과")
-    display_etf_performance(backtester)
+        st.plotly_chart(fig, use_container_width=True)
 
-    # 5. 연간 요약 테이블
+
+def _render_annual_summary(annual_df: pd.DataFrame):
+    """연간 성과 요약 테이블 렌더링"""
+
     st.subheader("연간 성과 요약")
-    
-    annual_df = backtester.get_annual_summary_df(result)
-    
+
     if not annual_df.empty:
         # 포맷팅: 숫자값 유지, 소수점 처리
         display_df = annual_df.copy()
@@ -516,40 +507,43 @@ def display_backtest_results(result: BacktestResult, backtester: PortfolioBackte
         ]
 
         st.dataframe(display_df, use_container_width=True, hide_index=True)
-    
-    # 6. 인출금 vs 배당금 비교
+
+
+def _render_withdrawal_dividend(result: BacktestResult):
+    """인출금 vs 배당금 비교 차트 렌더링"""
+
     st.subheader("인출금 vs 배당금")
-    
+
     col1, col2 = st.columns(2)
-    
+
     with col1:
         if result.withdrawal_events:
             withdrawal_df = pd.DataFrame(result.withdrawal_events)
-            
-            fig3 = go.Figure()
-            fig3.add_trace(go.Bar(
+
+            fig = go.Figure()
+            fig.add_trace(go.Bar(
                 x=withdrawal_df['date'],
                 y=withdrawal_df['from_dividend'],
                 name='배당금에서',
                 marker_color='#2ca02c'
             ))
-            fig3.add_trace(go.Bar(
+            fig.add_trace(go.Bar(
                 x=withdrawal_df['date'],
                 y=withdrawal_df['from_portfolio'],
                 name='포트폴리오에서',
                 marker_color='#d62728'
             ))
-            
-            fig3.update_layout(
+
+            fig.update_layout(
                 title="인출금 구성",
                 xaxis_title="날짜",
                 yaxis_title="금액 (USD)",
                 barmode='stack',
                 height=350
             )
-            
-            st.plotly_chart(fig3, use_container_width=True)
-    
+
+            st.plotly_chart(fig, use_container_width=True)
+
     with col2:
         if result.dividend_events:
             div_df = pd.DataFrame(result.dividend_events)
@@ -559,71 +553,72 @@ def display_backtest_results(result: BacktestResult, backtester: PortfolioBackte
                 'tax': 'sum'
             }).reset_index()
             div_monthly['date'] = div_monthly['date'].dt.to_timestamp()
-            
-            fig4 = go.Figure()
-            fig4.add_trace(go.Bar(
+
+            fig = go.Figure()
+            fig.add_trace(go.Bar(
                 x=div_monthly['date'],
                 y=div_monthly['net_dividend'],
                 name='순 배당금',
                 marker_color='#2ca02c'
             ))
-            fig4.add_trace(go.Bar(
+            fig.add_trace(go.Bar(
                 x=div_monthly['date'],
                 y=div_monthly['tax'],
                 name='배당소득세',
                 marker_color='#ff7f0e'
             ))
-            
-            fig4.update_layout(
+
+            fig.update_layout(
                 title="월별 배당금 및 세금",
                 xaxis_title="날짜",
                 yaxis_title="금액 (USD)",
                 barmode='stack',
                 height=350
             )
-            
-            st.plotly_chart(fig4, use_container_width=True)
-    
-    # 7. 세금 요약
+
+            st.plotly_chart(fig, use_container_width=True)
+
+
+def _render_tax_summary(result: BacktestResult):
+    """세금 요약 및 파이 차트 렌더링"""
+
     st.subheader("세금 요약")
-    
+
     col1, col2, col3 = st.columns(3)
-    
-    dividend_tax = sum(
-        e.tax_amount for e in result.tax_events 
-        if e.tax_type == 'dividend'
-    )
-    capital_gains_tax = sum(
-        e.tax_amount for e in result.tax_events 
-        if e.tax_type == 'capital_gains'
-    )
-    
+
+    tax_summary = summarize_tax_events(result.tax_events)
+    dividend_tax = tax_summary['dividend_tax']
+    capital_gains_tax = tax_summary['capital_gains_tax']
+
     with col1:
         st.metric("배당소득세 합계", f"${dividend_tax:,.0f}")
-    
+
     with col2:
         st.metric("양도소득세 합계", f"${capital_gains_tax:,.0f}")
-    
+
     with col3:
         st.metric("총 세금", f"${result.total_tax:,.0f}")
-    
+
     # 세금 비율 파이 차트
     if result.total_tax > 0:
-        fig5 = go.Figure(data=[go.Pie(
+        fig = go.Figure(data=[go.Pie(
             labels=['배당소득세', '양도소득세'],
             values=[dividend_tax, capital_gains_tax],
             hole=.4,
             marker_colors=['#ff7f0e', '#d62728']
         )])
-        
-        fig5.update_layout(
+
+        fig.update_layout(
             title="세금 구성",
             height=300
         )
-        
-        st.plotly_chart(fig5, use_container_width=True)
-    
-    # 8. 상세 로그 (펼쳐보기)
+
+        st.plotly_chart(fig, use_container_width=True)
+
+
+def _render_detail_logs(result: BacktestResult):
+    """상세 리밸런싱/배당금 로그 렌더링"""
+
     with st.expander("상세 리밸런싱 로그"):
         if result.rebalance_events:
             for event in result.rebalance_events[:10]:  # 최근 10개만
@@ -652,7 +647,7 @@ def display_backtest_results(result: BacktestResult, backtester: PortfolioBackte
                 else:
                     st.markdown("  - 거래 없음 (목표 비율 유지)")
                 st.markdown("---")
-    
+
     with st.expander("상세 배당금 로그"):
         if result.dividend_events:
             div_summary = pd.DataFrame(result.dividend_events)
@@ -660,4 +655,27 @@ def display_backtest_results(result: BacktestResult, backtester: PortfolioBackte
             div_summary = div_summary.round(2)
             # 전체 기간 배당 로그 표시 (최근 20개 제한 제거)
             st.dataframe(div_summary, use_container_width=True, hide_index=True)
+
+
+def display_backtest_results(result: BacktestResult, backtester: PortfolioBacktester):
+    """백테스트 결과 표시"""
+
+    st.markdown("---")
+    st.subheader("백테스트 결과")
+
+    _render_performance_metrics(result)
+
+    st.markdown("---")
+    history_df = backtester.get_portfolio_history_df(result)
+
+    _render_portfolio_chart(history_df, result)
+    _render_allocation_chart(history_df)
+
+    st.subheader("구성 종목별 성과")
+    display_etf_performance(backtester)
+
+    _render_annual_summary(backtester.get_annual_summary_df(result))
+    _render_withdrawal_dividend(result)
+    _render_tax_summary(result)
+    _render_detail_logs(result)
 
