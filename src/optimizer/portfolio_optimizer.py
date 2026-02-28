@@ -17,7 +17,8 @@ from pypfopt import EfficientFrontier
 from pypfopt import risk_models
 from pypfopt import expected_returns
 
-from config.settings import BACKTEST_CONSTANTS
+from config.settings import BACKTEST_CONSTANTS, DASHBOARD_CONSTANTS
+from src.data.data_fetcher import fetch_adjusted_prices
 
 logger = logging.getLogger(__name__)
 
@@ -46,10 +47,11 @@ class PortfolioOptimizer:
             period_years: 과거 데이터 분석 기간 (년)
             risk_free_rate: 무위험수익률 (기본값: settings에서 로드)
         """
+        max_etfs = DASHBOARD_CONSTANTS["max_optimization_etfs"]
         if len(tickers) < 2:
             raise ValueError("최소 2개 이상의 티커가 필요합니다.")
-        if len(tickers) > 10:
-            raise ValueError("최대 10개까지 티커를 지정할 수 있습니다.")
+        if len(tickers) > max_etfs:
+            raise ValueError(f"최대 {max_etfs}개까지 티커를 지정할 수 있습니다.")
 
         self.tickers = tickers
         self.period_years = period_years
@@ -61,7 +63,7 @@ class PortfolioOptimizer:
 
     def fetch_data(self) -> pd.DataFrame:
         """
-        yfinance에서 가격 데이터 조회
+        yfinance에서 가격 데이터 조회 (캐싱 레이어 사용)
 
         Returns:
             조정 종가 DataFrame (columns: tickers)
@@ -71,37 +73,12 @@ class PortfolioOptimizer:
 
         logger.info(f"Fetching data for {self.tickers} from {start_date} to {end_date}")
 
-        prices = pd.DataFrame()
-
-        for ticker in self.tickers:
-            try:
-                data = yf.download(
-                    ticker,
-                    start=start_date,
-                    end=end_date,
-                    progress=False
-                )
-                if len(data) > 0:
-                    # yfinance가 MultiIndex 또는 단일 컬럼 반환 가능
-                    if 'Adj Close' in data.columns:
-                        prices[ticker] = data['Adj Close']
-                    elif ('Adj Close', ticker) in data.columns:
-                        prices[ticker] = data[('Adj Close', ticker)]
-                    else:
-                        # 단일 티커의 경우
-                        prices[ticker] = data['Close']
-            except Exception as e:
-                logger.error(f"Error fetching {ticker}: {e}")
-                raise ValueError(f"티커 '{ticker}' 데이터를 가져올 수 없습니다.")
-
-        if prices.empty:
-            raise ValueError("가격 데이터를 가져올 수 없습니다.")
-
-        # 결측치 처리
-        prices = prices.dropna()
-
-        if len(prices) < 252:  # 최소 1년 데이터 필요
-            raise ValueError("충분한 가격 데이터가 없습니다. (최소 1년 필요)")
+        prices = fetch_adjusted_prices(
+            tickers=tuple(self.tickers),
+            start_date=str(start_date.date()),
+            end_date=str(end_date.date()),
+            min_days=BACKTEST_CONSTANTS.get('min_data_days', 252)
+        )
 
         self._price_data = prices
 
