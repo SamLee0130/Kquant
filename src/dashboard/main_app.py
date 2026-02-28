@@ -11,6 +11,7 @@ sys.path.append(str(Path(__file__).parent.parent.parent))
 
 from src.dashboard.allocation_backtest_page import show_allocation_backtest_page
 from src.dashboard.portfolio_comparison_page import show_portfolio_comparison_page
+from src.dashboard.optimization_page import show_portfolio_optimization_page
 from config.settings import STREAMLIT_CONFIG
 
 # 로깅 설정
@@ -35,16 +36,18 @@ def main():
     with st.sidebar:
         page = st.radio(
             "페이지 선택",
-            options=["자산 배분 백테스트", "포트폴리오 비교"],
+            options=["자산 배분 백테스트", "포트폴리오 비교", "최적 포트폴리오"],
             index=0
         )
         st.markdown("---")
-    
+
     # 페이지 라우팅
     if page == "자산 배분 백테스트":
         show_allocation_backtest_page()
     elif page == "포트폴리오 비교":
         show_portfolio_comparison_page()
+    elif page == "최적 포트폴리오":
+        show_portfolio_optimization_page()
 
 
 if __name__ == "__main__":
