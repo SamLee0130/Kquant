@@ -48,3 +48,6 @@ temp/
 
 # Serena MCP server cache
 .serena/
+
+# Playwright MCP screenshots
+.playwright-mcp/
