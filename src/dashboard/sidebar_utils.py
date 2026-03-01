@@ -6,19 +6,22 @@
 """
 import streamlit as st
 from dataclasses import dataclass
-from config.settings import ETF_BACKTEST_DEFAULTS
+from config.settings import ETF_BACKTEST_DEFAULTS, KOREAN_TAX_DEFAULTS, CURRENCY_DEFAULTS
 
 
 @dataclass
 class BacktestSettings:
     """백테스트 설정 값"""
     initial_capital: float
+    base_currency: str
     backtest_years: int
     rebalance_freq: str
     withdrawal_rate: float
     dividend_tax_rate: float
     capital_gains_tax_rate: float
     transaction_cost_rate: float
+    kr_dividend_tax_rate: float = 0.154
+    kr_capital_gains_rate: float = 0.154
 
 
 def render_common_sidebar(key_prefix: str = "") -> BacktestSettings:
@@ -32,13 +35,28 @@ def render_common_sidebar(key_prefix: str = "") -> BacktestSettings:
     """
     st.subheader("백테스트 설정" if not key_prefix else "공통 설정")
 
-    # 초기 자본
+    # 기준 통화
+    base_currency = st.selectbox(
+        "기준 통화",
+        options=CURRENCY_DEFAULTS["base_currencies"],
+        index=0,  # KRW 기본값
+        key=f"{key_prefix}base_currency" if key_prefix else "base_currency",
+        help="포트폴리오 가치를 표시할 기준 통화. 혼합 포트폴리오는 이 통화로 환산됩니다."
+    )
+
+    # 초기 자본 (기준 통화에 따라 동적 변경)
+    is_krw = base_currency == "KRW"
+    capital_label = f"초기 자본 ({base_currency})"
+    capital_default = CURRENCY_DEFAULTS["default_capital_krw"] if is_krw else CURRENCY_DEFAULTS["default_capital_usd"]
+    capital_max = 100_000_000_000 if is_krw else 100_000_000
+    capital_step = 100_000_000 if is_krw else 100_000
+
     initial_capital = st.number_input(
-        "초기 자본 (USD)",
+        capital_label,
         min_value=10_000,
-        max_value=100_000_000,
-        value=ETF_BACKTEST_DEFAULTS['initial_capital'],
-        step=100_000,
+        max_value=capital_max,
+        value=capital_default,
+        step=capital_step,
         format="%d",
         key=f"{key_prefix}initial_capital" if key_prefix else None,
         help="백테스트 시작 시 투자할 초기 자본금"
@@ -79,6 +97,8 @@ def render_common_sidebar(key_prefix: str = "") -> BacktestSettings:
     st.markdown("---")
     st.subheader("세금 설정")
 
+    st.caption("해외 상장 ETF")
+
     # 배당소득세
     dividend_tax_rate = st.number_input(
         "배당소득세 (%)",
@@ -87,7 +107,7 @@ def render_common_sidebar(key_prefix: str = "") -> BacktestSettings:
         value=ETF_BACKTEST_DEFAULTS['dividend_tax_rate'] * 100,
         step=1.0,
         key=f"{key_prefix}dividend_tax" if key_prefix else None,
-        help="배당금에 부과되는 세율"
+        help="해외 ETF 배당금에 부과되는 세율"
     ) / 100
 
     # 양도소득세
@@ -98,8 +118,31 @@ def render_common_sidebar(key_prefix: str = "") -> BacktestSettings:
         value=ETF_BACKTEST_DEFAULTS['capital_gains_tax_rate'] * 100,
         step=1.0,
         key=f"{key_prefix}capital_gains_tax" if key_prefix else None,
-        help="양도차익에 부과되는 세율 (연말 정산, 다음해 차감)"
+        help="해외 ETF 양도차익 세율 (연말 정산, 다음해 차감)"
     ) / 100
+
+    with st.expander("국내 상장 ETF 세금", expanded=False):
+        kr_dividend_tax_rate = st.number_input(
+            "국내 배당소득세 (%)",
+            min_value=0.0,
+            max_value=50.0,
+            value=KOREAN_TAX_DEFAULTS['kr_dividend_tax_rate'] * 100,
+            step=0.1,
+            key=f"{key_prefix}kr_dividend_tax" if key_prefix else None,
+            help="국내 ETF 배당소득세 (소득세 14% + 지방소득세 1.4%)"
+        ) / 100
+
+        kr_capital_gains_rate = st.number_input(
+            "국내 기타 ETF 매매차익 세율 (%)",
+            min_value=0.0,
+            max_value=50.0,
+            value=KOREAN_TAX_DEFAULTS['kr_other_capital_gains_rate'] * 100,
+            step=0.1,
+            key=f"{key_prefix}kr_capital_gains_tax" if key_prefix else None,
+            help="국내 기타 ETF (해외/채권/원자재) 매매차익 배당소득세"
+        ) / 100
+
+        st.caption("국내 주식형 ETF 양도차익은 비과세")
 
     st.markdown("---")
     st.subheader("거래비용 설정")
@@ -117,10 +160,13 @@ def render_common_sidebar(key_prefix: str = "") -> BacktestSettings:
 
     return BacktestSettings(
         initial_capital=initial_capital,
+        base_currency=base_currency,
         backtest_years=backtest_years,
         rebalance_freq=rebalance_freq,
         withdrawal_rate=withdrawal_rate,
         dividend_tax_rate=dividend_tax_rate,
         capital_gains_tax_rate=capital_gains_tax_rate,
-        transaction_cost_rate=transaction_cost_rate
+        transaction_cost_rate=transaction_cost_rate,
+        kr_dividend_tax_rate=kr_dividend_tax_rate,
+        kr_capital_gains_rate=kr_capital_gains_rate
     )

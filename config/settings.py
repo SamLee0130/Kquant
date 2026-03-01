@@ -42,3 +42,42 @@ ETF_BACKTEST_DEFAULTS = {
         "BIL": 0.10                   # 단기 국채 ETF (10%)
     }
 }
+
+# 한국 상장 ETF 세금 설정
+KOREAN_TAX_DEFAULTS = {
+    "kr_dividend_tax_rate": 0.154,          # 배당소득세 15.4% (소득세 14% + 지방소득세 1.4%)
+    "kr_other_capital_gains_rate": 0.154,   # 기타 ETF 매매차익 배당소득세 15.4%
+    "kr_stock_capital_gains_rate": 0.0,     # 국내주식형 ETF 양도차익 비과세
+}
+
+# 기준 통화 설정
+CURRENCY_DEFAULTS = {
+    "base_currencies": ["KRW", "USD"],
+    "default_base_currency": "KRW",
+    "default_capital_krw": 1_000_000_000,  # ₩10억
+    "default_capital_usd": 1_000_000,       # $1M
+}
+
+# 한국 ETF 프리셋 포트폴리오
+KOREAN_ETF_PRESETS = {
+    "국내주식형": {
+        "069500.KS": 0.50,    # KODEX 200
+        "102110.KS": 0.50,    # TIGER 200
+    },
+    "글로벌 분산 (국내상장)": {
+        "069500.KS": 0.30,    # KODEX 200
+        "360750.KS": 0.40,    # TIGER S&P500
+        "148070.KS": 0.30,    # KOSEF 국고채10년
+    },
+    "해외 ETF (국내상장)": {
+        "360750.KS": 0.40,    # TIGER S&P500
+        "261240.KS": 0.30,    # TIGER 미국나스닥100
+        "305720.KS": 0.30,    # KODEX 미국S&P500TR
+    },
+    "한국 올웨더": {
+        "069500.KS": 0.30,    # KODEX 200
+        "360750.KS": 0.25,    # TIGER S&P500
+        "148070.KS": 0.25,    # KOSEF 국고채10년
+        "132030.KS": 0.20,    # KODEX 골드선물(H)
+    },
+}

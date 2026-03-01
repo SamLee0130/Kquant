@@ -16,7 +16,19 @@ import logging
 from src.optimizer.portfolio_optimizer import PortfolioOptimizer
 from src.backtest.portfolio_backtest import PortfolioBacktester
 from src.dashboard.sidebar_utils import render_common_sidebar
+from src.data.etf_classifier import classify_portfolio, needs_currency_conversion
+from src.data.fx_fetcher import CurrencyConverter
 from config.settings import ETF_BACKTEST_DEFAULTS, BACKTEST_CONSTANTS
+
+
+def _currency_symbol(base_currency: str) -> str:
+    """기준 통화 기호 반환"""
+    return "₩" if base_currency == "KRW" else "$"
+
+
+def _currency_label(base_currency: str) -> str:
+    """기준 통화 레이블 반환"""
+    return base_currency
 
 logger = logging.getLogger(__name__)
 
@@ -27,6 +39,9 @@ PRESET_PORTFOLIOS = {
     "Tech Heavy": ["QQQ", "VGT", "ARKK", "BND"],
     "배당 성장": ["VIG", "SCHD", "DGRO", "BND"],
     "올웨더 (Ray Dalio)": ["VTI", "TLT", "IEF", "GLD", "DBC"],
+    "국내 주식형": ["069500.KS", "102110.KS"],
+    "글로벌 분산 (국내상장)": ["069500.KS", "360750.KS", "148070.KS"],
+    "한국 올웨더": ["069500.KS", "360750.KS", "148070.KS", "132030.KS"],
     "Custom": []
 }
 
@@ -342,6 +357,12 @@ def _display_backtest_section(weights: dict, settings):
 
         try:
             with st.spinner("백테스트 실행 중..."):
+                # ETF 분류 및 환율 변환기 생성
+                etf_info = classify_portfolio(allocation)
+                converter = None
+                if needs_currency_conversion(etf_info, settings.base_currency):
+                    converter = CurrencyConverter(base_currency=settings.base_currency)
+
                 backtester = PortfolioBacktester(
                     initial_capital=settings.initial_capital,
                     allocation=allocation,
@@ -349,20 +370,24 @@ def _display_backtest_section(weights: dict, settings):
                     withdrawal_rate=settings.withdrawal_rate,
                     dividend_tax_rate=settings.dividend_tax_rate,
                     capital_gains_tax_rate=settings.capital_gains_tax_rate,
-                    transaction_cost_rate=settings.transaction_cost_rate
+                    transaction_cost_rate=settings.transaction_cost_rate,
+                    etf_info=etf_info,
+                    currency_converter=converter,
+                    kr_dividend_tax_rate=settings.kr_dividend_tax_rate,
+                    kr_capital_gains_rate=settings.kr_capital_gains_rate
                 )
 
                 result = backtester.run(years=settings.backtest_years)
 
             # 결과 표시
-            _display_backtest_results(result, backtester)
+            _display_backtest_results(result, backtester, settings.base_currency)
 
         except Exception as e:
             logger.error(f"Backtest error: {e}")
             st.error(f"백테스트 중 오류가 발생했습니다: {e}")
 
 
-def _display_backtest_results(result, backtester):
+def _display_backtest_results(result, backtester, base_currency: str):
     """백테스트 결과 표시"""
     st.markdown("---")
     st.subheader("백테스트 결과")
@@ -396,7 +421,7 @@ def _display_backtest_results(result, backtester):
 
     fig.update_layout(
         xaxis_title='날짜',
-        yaxis_title='가치 (USD)',
+        yaxis_title=f'가치 ({_currency_label(base_currency)})',
         height=400,
         hovermode='x unified'
     )
@@ -416,7 +441,8 @@ def _display_backtest_results(result, backtester):
             elif '%' in col or '수익률' in col:
                 display_df[col] = display_df[col].apply(lambda x: f"{x:.1f}%")
             else:
-                display_df[col] = display_df[col].apply(lambda x: f"${x:,.0f}")
+                sym = _currency_symbol(base_currency)
+                display_df[col] = display_df[col].apply(lambda x, s=sym: f"{s}{x:,.0f}")
 
         st.dataframe(display_df, hide_index=True, use_container_width=True)
 
@@ -424,14 +450,15 @@ def _display_backtest_results(result, backtester):
     st.markdown("**총계**")
     col1, col2, col3, col4 = st.columns(4)
 
+    sym = _currency_symbol(base_currency)
     with col1:
-        st.metric("총 인출금", f"${result.total_withdrawal:,.0f}")
+        st.metric("총 인출금", f"{sym}{result.total_withdrawal:,.0f}")
     with col2:
-        st.metric("총 배당금", f"${result.total_dividend_net:,.0f}")
+        st.metric("총 배당금", f"{sym}{result.total_dividend_net:,.0f}")
     with col3:
-        st.metric("총 세금", f"${result.total_tax:,.0f}")
+        st.metric("총 세금", f"{sym}{result.total_tax:,.0f}")
     with col4:
-        st.metric("총 거래비용", f"${result.total_transaction_cost:,.0f}")
+        st.metric("총 거래비용", f"{sym}{result.total_transaction_cost:,.0f}")
 
 
 # 페이지 함수 (main_app에서 호출)
