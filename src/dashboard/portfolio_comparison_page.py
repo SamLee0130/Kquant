@@ -26,6 +26,25 @@ logger = logging.getLogger(__name__)
 PORTFOLIO_COLORS = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd']
 
 
+def _has_any_korean_etfs(allocations: List[Dict[str, float]]) -> bool:
+    """어떤 포트폴리오라도 한국 ETF를 포함하는지 확인"""
+    return any(
+        is_korean_ticker(symbol)
+        for alloc in allocations
+        for symbol in alloc
+    )
+
+
+def _comp_currency_symbol(allocations: List[Dict[str, float]]) -> str:
+    """비교 포트폴리오들의 통화 기호 반환"""
+    return "₩" if _has_any_korean_etfs(allocations) else "$"
+
+
+def _comp_currency_label(allocations: List[Dict[str, float]]) -> str:
+    """비교 포트폴리오들의 통화 레이블 반환"""
+    return "KRW" if _has_any_korean_etfs(allocations) else "USD"
+
+
 def show_portfolio_comparison_page():
     """포트폴리오 비교 페이지 표시"""
     st.header("포트폴리오 비교")
@@ -306,22 +325,24 @@ def _render_summary_table(
         for r in results
     )
 
+    sym = _comp_currency_symbol(allocations)
+
     metrics_labels = [
-        "최종 자산 ($)",
+        f"최종 자산 ({sym})",
         "총 수익률 (%)",
         "CAGR (%)",
         "변동성 (%)",
         "샤프비율",
         "최대 낙폭 (%)",
-        "총 인출금 ($)",
-        "총 배당금(세후) ($)",
-        "총 세금 ($)",
-        "총 세금(배당) ($)",
-        "총 세금(양도) ($)",
+        f"총 인출금 ({sym})",
+        f"총 배당금(세후) ({sym})",
+        f"총 세금 ({sym})",
+        f"총 세금(배당) ({sym})",
+        f"총 세금(양도) ({sym})",
     ]
     if has_kr_tax:
-        metrics_labels.append("총 세금(국내 매매) ($)")
-    metrics_labels.append("총 거래비용 ($)")
+        metrics_labels.append(f"총 세금(국내 매매) ({sym})")
+    metrics_labels.append(f"총 거래비용 ({sym})")
 
     summary_data = {"지표": metrics_labels}
 
@@ -368,7 +389,8 @@ def _render_summary_table(
 
 def _render_portfolio_value_chart(
     histories: List[pd.DataFrame],
-    initial_capital: float
+    initial_capital: float,
+    allocations: List[Dict[str, float]] = None
 ):
     """포트폴리오 가치 추이 차트 렌더링"""
 
@@ -387,17 +409,19 @@ def _render_portfolio_value_chart(
         ))
 
     # 초기 자본 기준선
+    sym = _comp_currency_symbol(allocations) if allocations else "$"
+    lbl = _comp_currency_label(allocations) if allocations else "USD"
     fig.add_hline(
         y=initial_capital,
         line_dash="dash",
         line_color="gray",
-        annotation_text=f"초기 자본: ${initial_capital:,.0f}"
+        annotation_text=f"초기 자본: {sym}{initial_capital:,.0f}"
     )
 
     fig.update_layout(
         title="포트폴리오 가치 비교",
         xaxis_title="날짜",
-        yaxis_title="금액 (USD)",
+        yaxis_title=f"금액 ({lbl})",
         height=450,
         hovermode='x unified',
         legend=dict(
@@ -528,6 +552,6 @@ def _display_comparison_results(
         for backtester, result in zip(backtesters, results)
     ]
 
-    _render_portfolio_value_chart(histories, initial_capital)
+    _render_portfolio_value_chart(histories, initial_capital, allocations)
     _render_cumulative_returns_chart(histories, initial_capital)
     _render_annual_comparison_chart(backtesters, results)

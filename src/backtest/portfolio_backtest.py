@@ -451,27 +451,37 @@ class PortfolioBacktester:
         tax = self.tax_calculator.settle_annual_capital_gains_tax(year)
         return tax
     
+    def _get_usd_fx_rate(self, date: pd.Timestamp) -> float:
+        """USD → base currency 환율 조회 (혼합 포트폴리오용)"""
+        if not self.currency_converter:
+            return 1.0
+        return self.currency_converter.get_fx_rate("USD", date)
+
     def _apply_deferred_tax(self, year: int) -> float:
         """이연된 양도소득세 차감 (1월)
 
         전년도 양도소득세를 포트폴리오에서 현금으로 차감합니다.
+        이연 양도소득세는 US ETF에서만 발생하므로 USD 기준입니다.
+        혼합 포트폴리오(base=KRW)인 경우 FX 변환 후 차감합니다.
         현금이 부족하면 비례 매도합니다.
         """
         tax = self.tax_calculator.get_deferred_tax(year)
         if tax <= 0:
             return 0.0
 
+        date = pd.Timestamp(year=year, month=1, day=15)  # 1월 중순 가정
+        fx_rate = self._get_usd_fx_rate(date)
+        tax_base = tax * fx_rate  # base currency 기준 세금
+
         # 현금에서 우선 차감
-        if self.cash >= tax:
-            self.cash -= tax
-            return tax
+        if self.cash >= tax_base:
+            self.cash -= tax_base
+            return tax_base
 
         # 부족분은 포트폴리오에서 매도
         from_cash = self.cash
-        remaining = tax - from_cash
+        remaining = tax_base - from_cash
         self.cash = 0
-
-        date = pd.Timestamp(year=year, month=1, day=15)  # 1월 중순 가정
 
         for symbol, shares in list(self.holdings.items()):
             if remaining <= 0:
@@ -481,15 +491,16 @@ class PortfolioBacktester:
             if not price or shares <= 0:
                 continue
 
+            symbol_fx_rate = self._get_fx_rate(symbol, date)
             weight = self.allocation.get(symbol, 0)
-            sell_value = remaining * weight
-            sell_shares = min(sell_value / price, shares)
+            sell_value_base = remaining * weight
+            sell_shares = min(sell_value_base / (price * symbol_fx_rate), shares)
 
             if sell_shares > 0:
                 self.holdings[symbol] -= sell_shares
-                remaining -= sell_shares * price
+                remaining -= sell_shares * price * symbol_fx_rate
 
-        return tax
+        return tax_base
 
     def _setup_dates(
         self,
@@ -840,11 +851,12 @@ class PortfolioBacktester:
                 'cumulative_dividend': snapshot.cumulative_dividend,
                 'cumulative_tax': snapshot.cumulative_tax
             }
-            # 종목별 가치 추가
+            # 종목별 가치 추가 (base currency 기준)
             for symbol, shares in snapshot.holdings.items():
                 price = snapshot.prices.get(symbol, 0)
+                fx_rate = self._get_fx_rate(symbol, snapshot.date)
                 record[f'{symbol}_shares'] = shares
-                record[f'{symbol}_value'] = shares * price if price else 0
+                record[f'{symbol}_value'] = shares * price * fx_rate if price else 0
             records.append(record)
         
         return pd.DataFrame(records)

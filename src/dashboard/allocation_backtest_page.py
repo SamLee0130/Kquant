@@ -101,6 +101,11 @@ def calculate_dividend_yield(price_data: dict, dividend_data: dict, symbols: lis
     return pd.DataFrame(yield_data)
 
 
+def _etf_currency_label(symbol: str) -> str:
+    """개별 ETF의 native currency 레이블 반환"""
+    return "KRW" if is_korean_ticker(symbol) else "USD"
+
+
 def display_etf_performance(backtester: 'PortfolioBacktester'):
     """
     구성 종목별 성과 표시 (주가 차트 + 배당금 차트 + 배당수익률 테이블)
@@ -161,8 +166,9 @@ def display_etf_performance(backtester: 'PortfolioBacktester'):
                 showlegend=False
             )
 
-            fig.update_yaxes(title_text="주가 (USD)", row=1, col=1)
-            fig.update_yaxes(title_text="배당금 (USD)", row=2, col=1)
+            etf_lbl = _etf_currency_label(symbol)
+            fig.update_yaxes(title_text=f"주가 ({etf_lbl})", row=1, col=1)
+            fig.update_yaxes(title_text=f"배당금 ({etf_lbl})", row=2, col=1)
             fig.update_xaxes(title_text="날짜", row=2, col=1)
 
             st.plotly_chart(fig, use_container_width=True)
@@ -564,8 +570,10 @@ def _render_allocation_chart(history_df: pd.DataFrame, allocation: dict):
         st.plotly_chart(fig, use_container_width=True)
 
 
-def _render_annual_summary(annual_df: pd.DataFrame):
+def _render_annual_summary(annual_df: pd.DataFrame, allocation: dict):
     """연간 성과 요약 테이블 렌더링"""
+
+    sym = _currency_symbol(allocation)
 
     st.subheader("연간 성과 요약")
 
@@ -575,12 +583,12 @@ def _render_annual_summary(annual_df: pd.DataFrame):
         display_df['year'] = display_df['year'].astype(int)
         display_df['return_pct'] = display_df['return_pct'].round(1)
 
-        # 달러 컬럼들은 정수로 반올림
-        dollar_columns = ['start_value', 'start_value_after_capital_tax', 'end_value',
+        # 금액 컬럼들은 정수로 반올림
+        money_columns = ['start_value', 'start_value_after_capital_tax', 'end_value',
                           'withdrawal', 'dividend_gross', 'dividend_net',
                           'tax_dividend', 'tax_capital_gains', 'tax_kr_capital_gains',
                           'transaction_cost']
-        for col in dollar_columns:
+        for col in money_columns:
             if col in display_df.columns:
                 display_df[col] = display_df[col].round(0).astype(int)
 
@@ -589,17 +597,17 @@ def _render_annual_summary(annual_df: pd.DataFrame):
 
         column_rename = {
             'year': '연도',
-            'start_value': '시작 가치 ($)',
-            'start_value_after_capital_tax': '시작 가치(양도세 차감 후) ($)',
-            'end_value': '종료 가치 ($)',
+            'start_value': f'시작 가치 ({sym})',
+            'start_value_after_capital_tax': f'시작 가치(양도세 차감 후) ({sym})',
+            'end_value': f'종료 가치 ({sym})',
             'return_pct': '수익률 (%)',
-            'withdrawal': '인출금 ($)',
-            'dividend_gross': '배당금(세전) ($)',
-            'dividend_net': '배당금(세후) ($)',
-            'tax_dividend': '세금(배당) ($)',
-            'tax_capital_gains': '세금(양도 차익) ($)',
-            'tax_kr_capital_gains': '세금(국내 매매) ($)',
-            'transaction_cost': '거래비용 ($)'
+            'withdrawal': f'인출금 ({sym})',
+            'dividend_gross': f'배당금(세전) ({sym})',
+            'dividend_net': f'배당금(세후) ({sym})',
+            'tax_dividend': f'세금(배당) ({sym})',
+            'tax_capital_gains': f'세금(양도 차익) ({sym})',
+            'tax_kr_capital_gains': f'세금(국내 매매) ({sym})',
+            'transaction_cost': f'거래비용 ({sym})'
         }
 
         if not has_kr_tax and 'tax_kr_capital_gains' in display_df.columns:
@@ -682,8 +690,10 @@ def _render_withdrawal_dividend(result: BacktestResult, allocation: dict):
             st.plotly_chart(fig, use_container_width=True)
 
 
-def _render_tax_summary(result: BacktestResult):
+def _render_tax_summary(result: BacktestResult, allocation: dict):
     """세금 요약 및 파이 차트 렌더링"""
+
+    sym = _currency_symbol(allocation)
 
     st.subheader("세금 요약")
 
@@ -697,17 +707,17 @@ def _render_tax_summary(result: BacktestResult):
     cols = st.columns(num_cols)
 
     with cols[0]:
-        st.metric("배당소득세 합계", f"${dividend_tax:,.0f}")
+        st.metric("배당소득세 합계", f"{sym}{dividend_tax:,.0f}")
 
     with cols[1]:
-        st.metric("양도소득세 합계", f"${capital_gains_tax:,.0f}")
+        st.metric("양도소득세 합계", f"{sym}{capital_gains_tax:,.0f}")
 
     if has_kr_tax:
         with cols[2]:
-            st.metric("국내 매매차익세 합계", f"${kr_capital_gains_tax:,.0f}")
+            st.metric("국내 매매차익세 합계", f"{sym}{kr_capital_gains_tax:,.0f}")
 
     with cols[-1]:
-        st.metric("총 세금", f"${result.total_tax:,.0f}")
+        st.metric("총 세금", f"{sym}{result.total_tax:,.0f}")
 
     # 세금 비율 파이 차트
     if result.total_tax > 0:
@@ -735,8 +745,10 @@ def _render_tax_summary(result: BacktestResult):
         st.plotly_chart(fig, use_container_width=True)
 
 
-def _render_detail_logs(result: BacktestResult):
+def _render_detail_logs(result: BacktestResult, allocation: dict):
     """상세 리밸런싱/배당금 로그 렌더링"""
+
+    sym = _currency_symbol(allocation)
 
     with st.expander("상세 리밸런싱 로그"):
         if result.rebalance_events:
@@ -745,7 +757,7 @@ def _render_detail_logs(result: BacktestResult):
                 # 초기 매수와 리밸런싱 구분
                 is_initial = event.get('is_initial_purchase', False)
                 event_type = "📦 초기 매수" if is_initial else "🔄 리밸런싱"
-                st.markdown(f"**{event['date'].strftime('%Y-%m-%d')}** {event_type} - 포트폴리오 가치: \\${event['portfolio_value']:,.0f}")
+                st.markdown(f"**{event['date'].strftime('%Y-%m-%d')}** {event_type} - 포트폴리오 가치: {sym}{event['portfolio_value']:,.0f}")
 
                 # 인출금 표시 (초기 매수 제외)
                 if not is_initial:
@@ -756,12 +768,12 @@ def _render_detail_logs(result: BacktestResult):
                         cost = withdrawal['transaction_cost']
                         parts = []
                         if from_cash > 0:
-                            parts.append(f"현금: \\${from_cash:,.0f}")
+                            parts.append(f"현금: {sym}{from_cash:,.0f}")
                         if from_sell > 0:
-                            parts.append(f"매도: \\${from_sell:,.0f}")
+                            parts.append(f"매도: {sym}{from_sell:,.0f}")
                         source = " + ".join(parts) if parts else ""
-                        cost_str = f" | 거래비용: \\${cost:,.0f}" if cost > 0 else ""
-                        st.markdown(f"  💰 인출: \\${withdrawal['total_withdrawal']:,.0f} ({source}){cost_str}")
+                        cost_str = f" | 거래비용: {sym}{cost:,.0f}" if cost > 0 else ""
+                        st.markdown(f"  💰 인출: {sym}{withdrawal['total_withdrawal']:,.0f} ({source}){cost_str}")
 
                 if event['trades']:
                     for trade in event['trades']:
@@ -773,12 +785,12 @@ def _render_detail_logs(result: BacktestResult):
                             st.markdown(
                                 f"  - {trade['symbol']}: {round(trade['current_shares']):,}주 → "
                                 f"{round(trade['target_shares']):,}주 ({action_symbol}{round(abs(trade['shares'])):,}주 {action}) "
-                                f"× \\${trade['price']:.2f} = \\${abs(trade['value']):,.0f}"
+                                f"× {sym}{trade['price']:,.2f} = {sym}{abs(trade['value']):,.0f}"
                             )
                         else:
                             st.markdown(
                                 f"  - {trade['symbol']}: {action} {round(abs(trade['shares'])):,}주 "
-                                f"× \\${trade['price']:.2f} = \\${abs(trade['value']):,.0f}"
+                                f"× {sym}{trade['price']:,.2f} = {sym}{abs(trade['value']):,.0f}"
                             )
                 else:
                     st.markdown("  - 거래 없음 (목표 비율 유지)")
@@ -812,8 +824,8 @@ def display_backtest_results(result: BacktestResult, backtester: PortfolioBackte
     st.subheader("구성 종목별 성과")
     display_etf_performance(backtester)
 
-    _render_annual_summary(backtester.get_annual_summary_df(result))
+    _render_annual_summary(backtester.get_annual_summary_df(result), allocation)
     _render_withdrawal_dividend(result, allocation)
-    _render_tax_summary(result)
-    _render_detail_logs(result)
+    _render_tax_summary(result, allocation)
+    _render_detail_logs(result, allocation)
 
