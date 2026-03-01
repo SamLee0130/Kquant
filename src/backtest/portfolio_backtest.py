@@ -683,8 +683,9 @@ class PortfolioBacktester:
         for date in all_dates:
             current_year = date.year
 
-            # 연초 양도소득세 납부 (1월)
+            # 연도 전환 시: 전년도 연말 정산 → 당해 이연 세금 납부
             if prev_year is not None and current_year != prev_year:
+                self._process_year_end_tax(prev_year, date)
                 cumulative_tax += self._apply_deferred_tax(current_year)
 
             # 리밸런싱 날짜 확인
@@ -710,10 +711,6 @@ class PortfolioBacktester:
                 withdrawal_event = self._process_withdrawal(date, dividend_cash)
                 cumulative_withdrawal += withdrawal_event['total_withdrawal']
                 self._rebalance(date)
-
-            # 연말 양도소득세 정산
-            if prev_year is not None and current_year != prev_year:
-                self._process_year_end_tax(prev_year, date)
 
             prev_year = current_year
 
@@ -803,8 +800,9 @@ class PortfolioBacktester:
     ) -> tuple[float, float, float, Optional[int]]:
         """종료일 처리 (휴장일인 경우 마지막 리밸런싱 처리)"""
         if end_date in rebalance_dates and prev_rebalance_date != end_date:
-            # 연초 양도소득세 납부
+            # 연도 전환 시: 전년도 연말 정산 → 당해 이연 세금 납부
             if prev_year is not None and end_date.year != prev_year:
+                self._process_year_end_tax(prev_year, end_date)
                 cumulative_tax += self._apply_deferred_tax(end_date.year)
 
             # 배당금 처리
@@ -816,10 +814,6 @@ class PortfolioBacktester:
             withdrawal_event = self._process_withdrawal(end_date, dividend_cash)
             cumulative_withdrawal += withdrawal_event['total_withdrawal']
             self._rebalance(end_date)
-
-            # 연말 세금 정산
-            if prev_year is not None and end_date.year != prev_year:
-                self._process_year_end_tax(prev_year, end_date)
 
             prev_year = end_date.year
 
