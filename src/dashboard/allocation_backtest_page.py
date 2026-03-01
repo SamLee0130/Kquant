@@ -621,11 +621,30 @@ def _render_detail_logs(result: BacktestResult):
 
     with st.expander("상세 리밸런싱 로그"):
         if result.rebalance_events:
+            # 인출 이벤트를 날짜 기준 dict로 변환하여 O(1) 조회
+            withdrawal_by_date = {w['date']: w for w in result.withdrawal_events}
+
             for event in result.rebalance_events[:10]:  # 최근 10개만
                 # 초기 매수와 리밸런싱 구분
                 is_initial = event.get('is_initial_purchase', False)
                 event_type = "📦 초기 매수" if is_initial else "🔄 리밸런싱"
-                st.markdown(f"**{event['date'].strftime('%Y-%m-%d')}** {event_type} - 포트폴리오 가치: ${event['portfolio_value']:,.0f}")
+                st.markdown(f"**{event['date'].strftime('%Y-%m-%d')}** {event_type} - 포트폴리오 가치: \\${event['portfolio_value']:,.0f}")
+
+                # 인출금 표시 (초기 매수 제외)
+                if not is_initial:
+                    withdrawal = withdrawal_by_date.get(event['date'])
+                    if withdrawal and withdrawal['total_withdrawal'] > 0:
+                        from_cash = withdrawal['from_dividend']
+                        from_sell = withdrawal['from_portfolio']
+                        cost = withdrawal['transaction_cost']
+                        parts = []
+                        if from_cash > 0:
+                            parts.append(f"현금: \\${from_cash:,.0f}")
+                        if from_sell > 0:
+                            parts.append(f"매도: \\${from_sell:,.0f}")
+                        source = " + ".join(parts) if parts else ""
+                        cost_str = f" | 거래비용: \\${cost:,.0f}" if cost > 0 else ""
+                        st.markdown(f"  💰 인출: \\${withdrawal['total_withdrawal']:,.0f} ({source}){cost_str}")
 
                 if event['trades']:
                     for trade in event['trades']:
@@ -637,12 +656,12 @@ def _render_detail_logs(result: BacktestResult):
                             st.markdown(
                                 f"  - {trade['symbol']}: {round(trade['current_shares']):,}주 → "
                                 f"{round(trade['target_shares']):,}주 ({action_symbol}{round(abs(trade['shares'])):,}주 {action}) "
-                                f"× ${trade['price']:.2f} = ${abs(trade['value']):,.0f}"
+                                f"× \\${trade['price']:.2f} = \\${abs(trade['value']):,.0f}"
                             )
                         else:
                             st.markdown(
                                 f"  - {trade['symbol']}: {action} {round(abs(trade['shares'])):,}주 "
-                                f"× ${trade['price']:.2f} = ${abs(trade['value']):,.0f}"
+                                f"× \\${trade['price']:.2f} = \\${abs(trade['value']):,.0f}"
                             )
                 else:
                     st.markdown("  - 거래 없음 (목표 비율 유지)")
