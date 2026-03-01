@@ -621,10 +621,7 @@ def _render_detail_logs(result: BacktestResult):
 
     with st.expander("상세 리밸런싱 로그"):
         if result.rebalance_events:
-            # 인출 이벤트를 날짜 기준 dict로 변환하여 O(1) 조회
-            withdrawal_by_date = {w['date']: w for w in result.withdrawal_events}
-
-            for event in result.rebalance_events[:10]:  # 최근 10개만
+            for event in result.rebalance_events[-10:]:  # 최근 10개만
                 # 초기 매수와 리밸런싱 구분
                 is_initial = event.get('is_initial_purchase', False)
                 event_type = "📦 초기 매수" if is_initial else "🔄 리밸런싱"
