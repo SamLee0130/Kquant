@@ -621,7 +621,7 @@ def _render_detail_logs(result: BacktestResult):
 
     with st.expander("상세 리밸런싱 로그"):
         if result.rebalance_events:
-            for event in result.rebalance_events[:10]:  # 최근 10개만
+            for event in result.rebalance_events[-10:]:  # 최근 10개만
                 # 초기 매수와 리밸런싱 구분
                 is_initial = event.get('is_initial_purchase', False)
                 event_type = "📦 초기 매수" if is_initial else "🔄 리밸런싱"
