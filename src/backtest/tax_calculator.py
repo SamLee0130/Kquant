@@ -59,8 +59,8 @@ class TaxCalculator:
         self.dividend_tax_rate = dividend_tax_rate
         self.capital_gains_tax_rate = capital_gains_tax_rate
         self.capital_gains_exemption = capital_gains_exemption
-        self.kr_dividend_tax_rate = kr_dividend_tax_rate or KOREAN_TAX_DEFAULTS["kr_dividend_tax_rate"]
-        self.kr_capital_gains_rate = kr_capital_gains_rate or KOREAN_TAX_DEFAULTS["kr_other_capital_gains_rate"]
+        self.kr_dividend_tax_rate = kr_dividend_tax_rate if kr_dividend_tax_rate is not None else KOREAN_TAX_DEFAULTS["kr_dividend_tax_rate"]
+        self.kr_capital_gains_rate = kr_capital_gains_rate if kr_capital_gains_rate is not None else KOREAN_TAX_DEFAULTS["kr_other_capital_gains_rate"]
 
         # 세금 이벤트 히스토리
         self.tax_history: List[TaxEvent] = []

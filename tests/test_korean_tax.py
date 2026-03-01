@@ -235,3 +235,17 @@ class TestCustomKoreanRates:
             10000.0, pd.Timestamp("2024-06-15"), market=Market.KR_OTHER
         )
         assert abs(event.tax_amount - 2000.0) < 0.01
+
+    def test_zero_kr_dividend_rate_respected(self):
+        """kr_dividend_tax_rate=0.0이 기본값으로 대체되지 않아야 함"""
+        calc = TaxCalculator(kr_dividend_tax_rate=0.0)
+        assert calc.kr_dividend_tax_rate == 0.0
+        event = calc.calculate_dividend_tax(
+            10000.0, pd.Timestamp("2024-06-15"), market=Market.KR_STOCK
+        )
+        assert event.tax_amount == 0.0
+
+    def test_zero_kr_capital_gains_rate_respected(self):
+        """kr_capital_gains_rate=0.0이 기본값으로 대체되지 않아야 함"""
+        calc = TaxCalculator(kr_capital_gains_rate=0.0)
+        assert calc.kr_capital_gains_rate == 0.0
