@@ -13,6 +13,11 @@ import logging
 from src.backtest.portfolio_backtest import PortfolioBacktester, BacktestResult
 from src.backtest.backtest_utils import summarize_tax_events
 from src.dashboard.sidebar_utils import render_common_sidebar
+from src.data.etf_classifier import (
+    classify_portfolio, normalize_ticker, is_korean_ticker,
+    has_mixed_currencies
+)
+from src.data.fx_fetcher import CurrencyConverter
 from config.settings import ETF_BACKTEST_DEFAULTS
 
 logger = logging.getLogger(__name__)
@@ -154,36 +159,50 @@ def show_portfolio_comparison_page():
                 'withdrawal_rate': withdrawal_rate,
                 'dividend_tax_rate': dividend_tax_rate,
                 'capital_gains_tax_rate': capital_gains_tax_rate,
-                'transaction_cost_rate': transaction_cost_rate
+                'transaction_cost_rate': transaction_cost_rate,
+                'kr_dividend_tax_rate': settings.kr_dividend_tax_rate,
+                'kr_capital_gains_rate': settings.kr_capital_gains_rate
             }
-            
+
+            def _create_backtester(alloc):
+                etf_info = classify_portfolio(alloc)
+                converter = None
+                if has_mixed_currencies(etf_info):
+                    converter = CurrencyConverter(base_currency="KRW")
+                return PortfolioBacktester(
+                    allocation=alloc,
+                    etf_info=etf_info,
+                    currency_converter=converter,
+                    **common_params
+                )
+
             # 포트폴리오 1 백테스트
-            backtester_1 = PortfolioBacktester(allocation=allocation_1, **common_params)
+            backtester_1 = _create_backtester(allocation_1)
             result_1 = backtester_1.run(start_date, end_date)
 
             # 포트폴리오 2 백테스트
-            backtester_2 = PortfolioBacktester(allocation=allocation_2, **common_params)
+            backtester_2 = _create_backtester(allocation_2)
             result_2 = backtester_2.run(start_date, end_date)
 
             # 포트폴리오 3 백테스트 (활성화된 경우)
             backtester_3 = None
             result_3 = None
             if enable_portfolio_3:
-                backtester_3 = PortfolioBacktester(allocation=allocation_3, **common_params)
+                backtester_3 = _create_backtester(allocation_3)
                 result_3 = backtester_3.run(start_date, end_date)
 
             # 포트폴리오 4 백테스트 (활성화된 경우)
             backtester_4 = None
             result_4 = None
             if enable_portfolio_4:
-                backtester_4 = PortfolioBacktester(allocation=allocation_4, **common_params)
+                backtester_4 = _create_backtester(allocation_4)
                 result_4 = backtester_4.run(start_date, end_date)
 
             # 포트폴리오 5 백테스트 (활성화된 경우)
             backtester_5 = None
             result_5 = None
             if enable_portfolio_5:
-                backtester_5 = PortfolioBacktester(allocation=allocation_5, **common_params)
+                backtester_5 = _create_backtester(allocation_5)
                 result_5 = backtester_5.run(start_date, end_date)
         
         st.success("비교 완료!")
@@ -219,23 +238,25 @@ def show_portfolio_comparison_page():
 
 def _render_portfolio_allocation(portfolio: dict, key_prefix: str) -> dict:
     """포트폴리오 자산 배분 UI 렌더링"""
-    
+
     # ETF 추가
     col_add1, col_add2 = st.columns([3, 1])
-    
+
     with col_add1:
         new_etf = st.text_input(
             "ETF 추가",
-            placeholder="예: VOO, TLT",
+            placeholder="예: VOO, TLT, 069500",
             key=f"{key_prefix}_new_etf"
-        ).upper().strip()
-    
+        ).strip()
+
     with col_add2:
         st.markdown("<br>", unsafe_allow_html=True)
         if st.button("추가", key=f"{key_prefix}_add_btn", type="secondary"):
-            if new_etf and new_etf not in portfolio:
-                portfolio[new_etf] = 0.0
-                st.rerun()
+            if new_etf:
+                normalized = normalize_ticker(new_etf)
+                if normalized not in portfolio:
+                    portfolio[normalized] = 0.0
+                    st.rerun()
     
     # 배분 입력
     allocation = {}
@@ -279,30 +300,34 @@ def _render_summary_table(
 
     st.markdown("### 성과 요약")
 
-    summary_data = {
-        "지표": [
-            "최종 자산 ($)",
-            "총 수익률 (%)",
-            "CAGR (%)",
-            "변동성 (%)",
-            "샤프비율",
-            "최대 낙폭 (%)",
-            "총 인출금 ($)",
-            "총 배당금(세후) ($)",
-            "총 세금 ($)",
-            "총 세금(배당) ($)",
-            "총 세금(양도) ($)",
-            "총 거래비용 ($)"
-        ]
-    }
+    # KR 매매차익세 여부 확인
+    has_kr_tax = any(
+        summarize_tax_events(r.tax_events)['kr_capital_gains_tax'] > 0
+        for r in results
+    )
 
-    # 각 포트폴리오 결과 추가
-    for i, result in enumerate(results):
+    metrics_labels = [
+        "최종 자산 ($)",
+        "총 수익률 (%)",
+        "CAGR (%)",
+        "변동성 (%)",
+        "샤프비율",
+        "최대 낙폭 (%)",
+        "총 인출금 ($)",
+        "총 배당금(세후) ($)",
+        "총 세금 ($)",
+        "총 세금(배당) ($)",
+        "총 세금(양도) ($)",
+    ]
+    if has_kr_tax:
+        metrics_labels.append("총 세금(국내 매매) ($)")
+    metrics_labels.append("총 거래비용 ($)")
+
+    summary_data = {"지표": metrics_labels}
+
+    def _result_values(result):
         tax_summary = summarize_tax_events(result.tax_events)
-        dividend_tax = tax_summary['dividend_tax']
-        capital_gains_tax = tax_summary['capital_gains_tax']
-
-        summary_data[f"포트폴리오 {i+1}"] = [
+        values = [
             int(round(result.final_value)),
             round(result.total_return, 1),
             round(result.cagr, 1),
@@ -312,34 +337,30 @@ def _render_summary_table(
             int(round(result.total_withdrawal)),
             int(round(result.total_dividend_net)),
             int(round(result.total_tax)),
-            int(round(dividend_tax)),
-            int(round(capital_gains_tax)),
-            int(round(result.total_transaction_cost))
+            int(round(tax_summary['dividend_tax'])),
+            int(round(tax_summary['capital_gains_tax'])),
         ]
+        if has_kr_tax:
+            values.append(int(round(tax_summary['kr_capital_gains_tax'])))
+        values.append(int(round(result.total_transaction_cost)))
+        return values
+
+    # 각 포트폴리오 결과 추가
+    for i, result in enumerate(results):
+        summary_data[f"포트폴리오 {i+1}"] = _result_values(result)
 
     # 차이 컬럼 추가 (포트폴리오 1 기준)
-    result_1 = results[0]
-    tax_1 = summarize_tax_events(result_1.tax_events)
+    vals_1 = _result_values(results[0])
 
-    # 포트폴리오 2~5에 대한 비교 컬럼 추가 (루프로 처리)
     for idx in range(1, num_portfolios):
-        result_n = results[idx]
-        tax_n = summarize_tax_events(result_n.tax_events)
-
-        summary_data[f"1 vs {idx+1}"] = [
-            int(round(result_1.final_value - result_n.final_value)),
-            round(result_1.total_return - result_n.total_return, 1),
-            round(result_1.cagr - result_n.cagr, 1),
-            round(result_1.volatility - result_n.volatility, 1),
-            round(result_1.sharpe_ratio - result_n.sharpe_ratio, 2),
-            round(result_1.max_drawdown - result_n.max_drawdown, 1),
-            int(round(result_1.total_withdrawal - result_n.total_withdrawal)),
-            int(round(result_1.total_dividend_net - result_n.total_dividend_net)),
-            int(round(result_1.total_tax - result_n.total_tax)),
-            int(round(tax_1['dividend_tax'] - tax_n['dividend_tax'])),
-            int(round(tax_1['capital_gains_tax'] - tax_n['capital_gains_tax'])),
-            int(round(result_1.total_transaction_cost - result_n.total_transaction_cost))
-        ]
+        vals_n = _result_values(results[idx])
+        diff = []
+        for v1, vn in zip(vals_1, vals_n):
+            if isinstance(v1, int):
+                diff.append(int(round(v1 - vn)))
+            else:
+                diff.append(round(v1 - vn, 2))
+        summary_data[f"1 vs {idx+1}"] = diff
 
     summary_df = pd.DataFrame(summary_data)
     st.dataframe(summary_df, use_container_width=True, hide_index=True)

@@ -15,9 +15,29 @@ import logging
 from src.backtest.portfolio_backtest import PortfolioBacktester, BacktestResult
 from src.backtest.backtest_utils import summarize_tax_events
 from src.dashboard.sidebar_utils import render_common_sidebar
-from config.settings import ETF_BACKTEST_DEFAULTS
+from src.data.etf_classifier import (
+    classify_portfolio, normalize_ticker, is_korean_ticker,
+    has_mixed_currencies, get_tax_label
+)
+from src.data.fx_fetcher import CurrencyConverter
+from config.settings import ETF_BACKTEST_DEFAULTS, KOREAN_ETF_PRESETS
 
 logger = logging.getLogger(__name__)
+
+
+def _has_korean_etfs(allocation: dict) -> bool:
+    """포트폴리오에 한국 ETF가 포함되어 있는지 확인"""
+    return any(is_korean_ticker(symbol) for symbol in allocation)
+
+
+def _currency_symbol(allocation: dict) -> str:
+    """포트폴리오 기반 통화 기호 반환"""
+    return "₩" if _has_korean_etfs(allocation) else "$"
+
+
+def _currency_label(allocation: dict) -> str:
+    """포트폴리오 기반 통화 레이블 반환"""
+    return "KRW" if _has_korean_etfs(allocation) else "USD"
 
 
 def calculate_dividend_yield(price_data: dict, dividend_data: dict, symbols: list) -> pd.DataFrame:
@@ -181,40 +201,74 @@ def show_allocation_backtest_page():
     
     # 메인 영역 - 자산 배분 설정
     st.subheader("자산 배분 설정")
-    
+
     # 세션 상태 초기화
     if 'etf_allocation' not in st.session_state:
         st.session_state.etf_allocation = dict(ETF_BACKTEST_DEFAULTS['default_allocation'])
-    
+
+    # 프리셋 선택 (한국 ETF 프리셋 포함)
+    all_presets = {"직접 입력": {}}
+    all_presets["US 기본 (SPY/QQQ/BIL)"] = ETF_BACKTEST_DEFAULTS['default_allocation']
+    all_presets.update(KOREAN_ETF_PRESETS)
+
+    preset_choice = st.selectbox(
+        "프리셋 포트폴리오",
+        options=list(all_presets.keys()),
+        index=0,
+        help="미리 정의된 포트폴리오 구성 선택"
+    )
+
+    if preset_choice != "직접 입력" and st.button("프리셋 적용", type="secondary"):
+        st.session_state.etf_allocation = dict(all_presets[preset_choice])
+        st.rerun()
+
     # ETF 추가/삭제 UI
     col1, col2 = st.columns([3, 1])
-    
+
     with col1:
         new_etf = st.text_input(
             "ETF 추가",
-            placeholder="예: VOO, IWM, TLT",
+            placeholder="예: VOO, IWM, TLT, 069500 (KODEX 200)",
             key="new_etf_input"
-        ).upper().strip()
-    
+        ).strip()
+
     with col2:
         st.markdown("<br>", unsafe_allow_html=True)
         if st.button("추가", type="secondary"):
-            if new_etf and new_etf not in st.session_state.etf_allocation:
-                st.session_state.etf_allocation[new_etf] = 0.0
-                st.rerun()
-            elif new_etf in st.session_state.etf_allocation:
-                st.warning(f"{new_etf}는 이미 추가되어 있습니다.")
+            if new_etf:
+                normalized = normalize_ticker(new_etf)
+                if normalized not in st.session_state.etf_allocation:
+                    st.session_state.etf_allocation[normalized] = 0.0
+                    st.rerun()
+                else:
+                    st.warning(f"{normalized}는 이미 추가되어 있습니다.")
     
     # 현재 배분 표시 및 수정
     st.markdown("**현재 자산 배분**")
-    
+
+    # 한국 ETF 정보 표시
+    etf_info = classify_portfolio(st.session_state.etf_allocation)
+    has_kr = _has_korean_etfs(st.session_state.etf_allocation)
+
+    if has_kr:
+        kr_labels = []
+        for symbol, info in etf_info.items():
+            if is_korean_ticker(symbol):
+                tax_label = get_tax_label(info.market)
+                kr_labels.append(f"{symbol} ({info.display_name}) - {tax_label}")
+        if kr_labels:
+            st.info("국내 ETF: " + " | ".join(kr_labels))
+
     allocation = {}
     cols = st.columns(len(st.session_state.etf_allocation) + 1)
-    
+
     for i, (symbol, weight) in enumerate(st.session_state.etf_allocation.items()):
         with cols[i]:
+            label = symbol
+            if symbol in etf_info and is_korean_ticker(symbol):
+                label = f"{symbol}\n({etf_info[symbol].display_name})"
             new_weight = st.number_input(
-                f"{symbol}",
+                label,
                 min_value=0.0,
                 max_value=100.0,
                 value=weight * 100,
@@ -223,7 +277,7 @@ def show_allocation_backtest_page():
                 help=f"{symbol} 비중 (%)"
             )
             allocation[symbol] = new_weight / 100
-            
+
             if st.button("삭제", key=f"del_{symbol}", type="secondary"):
                 del st.session_state.etf_allocation[symbol]
                 st.rerun()
@@ -264,6 +318,12 @@ def show_allocation_backtest_page():
         
         with st.spinner("백테스트 실행 중... (데이터 수집 및 시뮬레이션)"):
             try:
+                # ETF 분류 및 환율 변환기 생성
+                portfolio_etf_info = classify_portfolio(allocation)
+                converter = None
+                if has_mixed_currencies(portfolio_etf_info):
+                    converter = CurrencyConverter(base_currency="KRW")
+
                 # 백테스터 생성 및 실행
                 backtester = PortfolioBacktester(
                     initial_capital=initial_capital,
@@ -272,7 +332,11 @@ def show_allocation_backtest_page():
                     withdrawal_rate=withdrawal_rate,
                     dividend_tax_rate=dividend_tax_rate,
                     capital_gains_tax_rate=capital_gains_tax_rate,
-                    transaction_cost_rate=transaction_cost_rate
+                    transaction_cost_rate=transaction_cost_rate,
+                    etf_info=portfolio_etf_info,
+                    currency_converter=converter,
+                    kr_dividend_tax_rate=settings.kr_dividend_tax_rate,
+                    kr_capital_gains_rate=settings.kr_capital_gains_rate
                 )
                 
                 result = backtester.run(years=backtest_years)
@@ -332,28 +396,39 @@ def _render_performance_metrics(result: BacktestResult):
     tax_summary = summarize_tax_events(result.tax_events)
     dividend_tax = tax_summary['dividend_tax']
     capital_gains_tax = tax_summary['capital_gains_tax']
+    kr_capital_gains_tax = tax_summary['kr_capital_gains_tax']
 
-    # 2행: 총 세금, 총 세금(배당), 총 세금(양도), 총 거래비용
-    row2_col1, row2_col2, row2_col3, row2_col4 = st.columns(4)
-    with row2_col1:
+    # 2행: 총 세금, 배당세, 양도소득세, 거래비용 (+ KR 즉시과세)
+    has_kr_tax = kr_capital_gains_tax > 0
+    num_tax_cols = 5 if has_kr_tax else 4
+    row2_cols = st.columns(num_tax_cols)
+
+    with row2_cols[0]:
         st.metric(
             "총 세금",
             f"${result.total_tax:,.0f}",
-            help="배당소득세 + 양도소득세"
+            help="배당소득세 + 양도소득세 + 국내 기타 ETF 매매차익세"
         )
-    with row2_col2:
+    with row2_cols[1]:
         st.metric(
             "총 세금(배당)",
             f"${dividend_tax:,.0f}",
             help="배당소득세 합계"
         )
-    with row2_col3:
+    with row2_cols[2]:
         st.metric(
             "총 세금(양도)",
             f"${capital_gains_tax:,.0f}",
-            help="양도소득세 합계"
+            help="해외 ETF 양도소득세 합계"
         )
-    with row2_col4:
+    if has_kr_tax:
+        with row2_cols[3]:
+            st.metric(
+                "총 세금(국내 매매)",
+                f"${kr_capital_gains_tax:,.0f}",
+                help="국내 기타 ETF 매매차익 배당소득세 합계"
+            )
+    with row2_cols[-1]:
         st.metric(
             "총 거래비용",
             f"${result.total_transaction_cost:,.0f}",
@@ -496,15 +571,34 @@ def _render_annual_summary(annual_df: pd.DataFrame):
         # 달러 컬럼들은 정수로 반올림
         dollar_columns = ['start_value', 'start_value_after_capital_tax', 'end_value',
                           'withdrawal', 'dividend_gross', 'dividend_net',
-                          'tax_dividend', 'tax_capital_gains', 'transaction_cost']
+                          'tax_dividend', 'tax_capital_gains', 'tax_kr_capital_gains',
+                          'transaction_cost']
         for col in dollar_columns:
             if col in display_df.columns:
                 display_df[col] = display_df[col].round(0).astype(int)
 
-        display_df.columns = [
-            '연도', '시작 가치 ($)', '시작 가치(양도세 차감 후) ($)', '종료 가치 ($)', '수익률 (%)',
-            '인출금 ($)', '배당금(세전) ($)', '배당금(세후) ($)', '세금(배당) ($)', '세금(양도 차익) ($)', '거래비용 ($)'
-        ]
+        # KR 매매차익세 컬럼이 모두 0이면 제거
+        has_kr_tax = 'tax_kr_capital_gains' in display_df.columns and display_df['tax_kr_capital_gains'].sum() > 0
+
+        column_rename = {
+            'year': '연도',
+            'start_value': '시작 가치 ($)',
+            'start_value_after_capital_tax': '시작 가치(양도세 차감 후) ($)',
+            'end_value': '종료 가치 ($)',
+            'return_pct': '수익률 (%)',
+            'withdrawal': '인출금 ($)',
+            'dividend_gross': '배당금(세전) ($)',
+            'dividend_net': '배당금(세후) ($)',
+            'tax_dividend': '세금(배당) ($)',
+            'tax_capital_gains': '세금(양도 차익) ($)',
+            'tax_kr_capital_gains': '세금(국내 매매) ($)',
+            'transaction_cost': '거래비용 ($)'
+        }
+
+        if not has_kr_tax and 'tax_kr_capital_gains' in display_df.columns:
+            display_df = display_df.drop(columns=['tax_kr_capital_gains'])
+
+        display_df = display_df.rename(columns=column_rename)
 
         st.dataframe(display_df, use_container_width=True, hide_index=True)
 
@@ -584,28 +678,44 @@ def _render_tax_summary(result: BacktestResult):
 
     st.subheader("세금 요약")
 
-    col1, col2, col3 = st.columns(3)
-
     tax_summary = summarize_tax_events(result.tax_events)
     dividend_tax = tax_summary['dividend_tax']
     capital_gains_tax = tax_summary['capital_gains_tax']
+    kr_capital_gains_tax = tax_summary['kr_capital_gains_tax']
+    has_kr_tax = kr_capital_gains_tax > 0
 
-    with col1:
+    num_cols = 4 if has_kr_tax else 3
+    cols = st.columns(num_cols)
+
+    with cols[0]:
         st.metric("배당소득세 합계", f"${dividend_tax:,.0f}")
 
-    with col2:
+    with cols[1]:
         st.metric("양도소득세 합계", f"${capital_gains_tax:,.0f}")
 
-    with col3:
+    if has_kr_tax:
+        with cols[2]:
+            st.metric("국내 매매차익세 합계", f"${kr_capital_gains_tax:,.0f}")
+
+    with cols[-1]:
         st.metric("총 세금", f"${result.total_tax:,.0f}")
 
     # 세금 비율 파이 차트
     if result.total_tax > 0:
+        labels = ['배당소득세', '양도소득세']
+        values = [dividend_tax, capital_gains_tax]
+        colors = ['#ff7f0e', '#d62728']
+
+        if has_kr_tax:
+            labels.append('국내 매매차익세')
+            values.append(kr_capital_gains_tax)
+            colors.append('#9467bd')
+
         fig = go.Figure(data=[go.Pie(
-            labels=['배당소득세', '양도소득세'],
-            values=[dividend_tax, capital_gains_tax],
+            labels=labels,
+            values=values,
             hole=.4,
-            marker_colors=['#ff7f0e', '#d62728']
+            marker_colors=colors
         )])
 
         fig.update_layout(
@@ -621,6 +731,7 @@ def _render_detail_logs(result: BacktestResult):
 
     with st.expander("상세 리밸런싱 로그"):
         if result.rebalance_events:
+            withdrawal_by_date = {e['date']: e for e in result.withdrawal_events} if result.withdrawal_events else {}
             for event in result.rebalance_events[-10:]:  # 최근 10개만
                 # 초기 매수와 리밸런싱 구분
                 is_initial = event.get('is_initial_purchase', False)

@@ -16,6 +16,8 @@ import logging
 from src.optimizer.portfolio_optimizer import PortfolioOptimizer
 from src.backtest.portfolio_backtest import PortfolioBacktester
 from src.dashboard.sidebar_utils import render_common_sidebar
+from src.data.etf_classifier import classify_portfolio, has_mixed_currencies
+from src.data.fx_fetcher import CurrencyConverter
 from config.settings import ETF_BACKTEST_DEFAULTS, BACKTEST_CONSTANTS
 
 logger = logging.getLogger(__name__)
@@ -27,6 +29,9 @@ PRESET_PORTFOLIOS = {
     "Tech Heavy": ["QQQ", "VGT", "ARKK", "BND"],
     "배당 성장": ["VIG", "SCHD", "DGRO", "BND"],
     "올웨더 (Ray Dalio)": ["VTI", "TLT", "IEF", "GLD", "DBC"],
+    "국내 주식형": ["069500.KS", "102110.KS"],
+    "글로벌 분산 (국내상장)": ["069500.KS", "360750.KS", "148070.KS"],
+    "한국 올웨더": ["069500.KS", "360750.KS", "148070.KS", "132030.KS"],
     "Custom": []
 }
 
@@ -342,6 +347,12 @@ def _display_backtest_section(weights: dict, settings):
 
         try:
             with st.spinner("백테스트 실행 중..."):
+                # ETF 분류 및 환율 변환기 생성
+                etf_info = classify_portfolio(allocation)
+                converter = None
+                if has_mixed_currencies(etf_info):
+                    converter = CurrencyConverter(base_currency="KRW")
+
                 backtester = PortfolioBacktester(
                     initial_capital=settings.initial_capital,
                     allocation=allocation,
@@ -349,7 +360,11 @@ def _display_backtest_section(weights: dict, settings):
                     withdrawal_rate=settings.withdrawal_rate,
                     dividend_tax_rate=settings.dividend_tax_rate,
                     capital_gains_tax_rate=settings.capital_gains_tax_rate,
-                    transaction_cost_rate=settings.transaction_cost_rate
+                    transaction_cost_rate=settings.transaction_cost_rate,
+                    etf_info=etf_info,
+                    currency_converter=converter,
+                    kr_dividend_tax_rate=settings.kr_dividend_tax_rate,
+                    kr_capital_gains_rate=settings.kr_capital_gains_rate
                 )
 
                 result = backtester.run(years=settings.backtest_years)

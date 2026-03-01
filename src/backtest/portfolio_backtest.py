@@ -15,6 +15,8 @@ import logging
 from .tax_calculator import TaxCalculator
 from config.settings import BACKTEST_CONSTANTS
 from src.data.data_fetcher import fetch_price_data, fetch_dividend_data
+from src.data.etf_classifier import ETFInfo, Market, has_mixed_currencies
+from src.data.fx_fetcher import CurrencyConverter
 
 logger = logging.getLogger(__name__)
 
@@ -82,11 +84,15 @@ class PortfolioBacktester:
         dividend_tax_rate: float = 0.15,  # 배당소득세 (15%)
         capital_gains_tax_rate: float = 0.22,  # 양도소득세 (22%)
         capital_gains_exemption: float = 2000.0,  # 양도소득세 기본공제 ($2,000)
-        transaction_cost_rate: float = 0.002  # 거래비용 (0.2%)
+        transaction_cost_rate: float = 0.002,  # 거래비용 (0.2%)
+        etf_info: Dict[str, ETFInfo] = None,
+        currency_converter: CurrencyConverter = None,
+        kr_dividend_tax_rate: float = None,
+        kr_capital_gains_rate: float = None
     ):
         """
         Args:
-            initial_capital: 초기 자본금 (USD)
+            initial_capital: 초기 자본금 (base currency 기준)
             allocation: 자산 배분 비율 (예: {'SPY': 0.6, 'QQQ': 0.3, 'BIL': 0.1})
             rebalance_frequency: 리밸런싱 주기 ('quarterly' 또는 'yearly')
             withdrawal_rate: 연간 인출률 (0.05 = 5%)
@@ -94,18 +100,26 @@ class PortfolioBacktester:
             capital_gains_tax_rate: 양도소득세율 (0.22 = 22%)
             capital_gains_exemption: 양도소득세 기본공제액 (기본 $2,000)
             transaction_cost_rate: 거래비용률 - 거래수수료 + 슬리피지 (0.002 = 0.2%)
+            etf_info: ETF 분류 정보 (없으면 US 기본 동작)
+            currency_converter: 환율 변환기 (혼합 통화 포트폴리오용)
+            kr_dividend_tax_rate: 국내 ETF 배당소득세율 (기본 15.4%)
+            kr_capital_gains_rate: 국내 기타 ETF 매매차익 세율 (기본 15.4%)
         """
         self.initial_capital = initial_capital
         self.allocation = allocation or {'SPY': 0.60, 'QQQ': 0.30, 'BIL': 0.10}
         self.rebalance_frequency = rebalance_frequency
         self.withdrawal_rate = withdrawal_rate
         self.transaction_cost_rate = transaction_cost_rate
-        
+        self.etf_info = etf_info
+        self.currency_converter = currency_converter
+
         # 세금 계산기 초기화
         self.tax_calculator = TaxCalculator(
             dividend_tax_rate=dividend_tax_rate,
             capital_gains_tax_rate=capital_gains_tax_rate,
-            capital_gains_exemption=capital_gains_exemption
+            capital_gains_exemption=capital_gains_exemption,
+            kr_dividend_tax_rate=kr_dividend_tax_rate,
+            kr_capital_gains_rate=kr_capital_gains_rate
         )
         
         # 데이터 캐시
@@ -137,6 +151,11 @@ class PortfolioBacktester:
             self._dividend_data[symbol] = fetch_dividend_data(symbol, start_str, end_str)
 
             logger.info(f"{symbol}: {len(self._price_data[symbol])} 거래일, {len(self._dividend_data[symbol])} 배당 이벤트")
+
+        # 혼합 통화 포트폴리오인 경우 환율 데이터도 조회
+        if self.currency_converter and self.etf_info and has_mixed_currencies(self.etf_info):
+            logger.info("혼합 통화 포트폴리오 감지 → 환율 데이터 조회 중...")
+            self.currency_converter.fetch_fx_data(start_str, end_str)
     
     def _get_price(self, symbol: str, date: pd.Timestamp) -> Optional[float]:
         """특정 날짜의 가격 조회 (없으면 직후 거래일 종가 우선, 그다음 직전)"""
@@ -171,14 +190,33 @@ class PortfolioBacktester:
         end_date = pd.Timestamp(end_date).tz_localize(None)
         mask = (dividends.index >= start_date) & (dividends.index <= end_date)
         return dividends[mask]
-    
+
+    def _get_market(self, symbol: str) -> Optional[Market]:
+        """ETF의 market 유형 반환"""
+        if not self.etf_info or symbol not in self.etf_info:
+            return None
+        return self.etf_info[symbol].market
+
+    def _get_fx_rate(self, symbol: str, date: pd.Timestamp) -> float:
+        """ETF의 native currency → base currency 변환 배율
+
+        etf_info나 currency_converter가 없으면 1.0 반환 (변환 없음).
+        """
+        if not self.currency_converter or not self.etf_info:
+            return 1.0
+        if symbol not in self.etf_info:
+            return 1.0
+        from_currency = self.etf_info[symbol].currency
+        return self.currency_converter.get_fx_rate(from_currency, date)
+
     def _get_portfolio_value(self, date: pd.Timestamp) -> float:
-        """포트폴리오 총 가치 계산"""
-        total = self.cash
+        """포트폴리오 총 가치 계산 (base currency 기준)"""
+        total = self.cash  # cash는 이미 base currency
         for symbol, shares in self.holdings.items():
             price = self._get_price(symbol, date)
             if price:
-                total += shares * price
+                fx_rate = self._get_fx_rate(symbol, date)
+                total += shares * price * fx_rate
         return total
     
     def _get_rebalance_dates(self, start_date: datetime, end_date: datetime) -> List[pd.Timestamp]:
@@ -213,67 +251,73 @@ class PortfolioBacktester:
     
     def _rebalance(self, date: pd.Timestamp) -> Dict:
         """리밸런싱 실행"""
-        total_value = self._get_portfolio_value(date)
-        
+        total_value = self._get_portfolio_value(date)  # base currency
+
         trades = []
         total_gain = 0.0
         total_trade_cost = 0.0
-        total_traded_value = 0.0  # 거래된 금액 합계 (매수/매도 절대값)
-        
+        total_traded_value = 0.0  # 거래된 금액 합계 (base currency, 매수/매도 절대값)
+
         for symbol, target_weight in self.allocation.items():
             price = self._get_price(symbol, date)
             if not price:
                 continue
-            
+
+            fx_rate = self._get_fx_rate(symbol, date)
+
             current_shares = self.holdings.get(symbol, 0)
-            current_value = current_shares * price
-            target_value = total_value * target_weight
-            diff_value = target_value - current_value
-            
-            if abs(diff_value) > MIN_TRADE_VALUE:  # 최소 거래 금액 이상 차이가 있을 때만 거래
-                shares_to_trade = diff_value / price
-                traded_value = shares_to_trade * price  # 양수=매수, 음수=매도
-                
-                # 매도 시 양도차익 계산
+            current_value_base = current_shares * price * fx_rate
+            target_value_base = total_value * target_weight
+            diff_value_base = target_value_base - current_value_base
+
+            if abs(diff_value_base) > MIN_TRADE_VALUE:
+                shares_to_trade = diff_value_base / (price * fx_rate)
+                traded_value_base = shares_to_trade * price * fx_rate
+
+                # 매도 시 양도차익 계산 (native currency 기준)
                 if shares_to_trade < 0:
                     avg_cost = self.cost_basis.get(symbol, price)
                     gain = abs(shares_to_trade) * (price - avg_cost)
                     total_gain += gain
-                    self.tax_calculator.record_capital_gain(gain, date)
-                
-                # 현금 업데이트 (매수 시 현금 감소, 매도 시 현금 증가)
-                self.cash -= traded_value
-                total_traded_value += abs(traded_value)
-                
+                    market = self._get_market(symbol)
+                    tax_event = self.tax_calculator.record_capital_gain(gain, date, market=market)
+                    # KR_OTHER 즉시 과세: 세금을 현금에서 차감
+                    if tax_event:
+                        self.cash -= tax_event.tax_amount * fx_rate
+
+                # 현금 업데이트 (base currency 기준)
+                self.cash -= traded_value_base
+                total_traded_value += abs(traded_value_base)
+
                 # 보유량 업데이트
                 new_shares = current_shares + shares_to_trade
                 self.holdings[symbol] = max(0, new_shares)
-                
-                # 평균 매수단가 업데이트 (매수 시)
+
+                # 평균 매수단가 업데이트 (native currency, 매수 시)
                 if shares_to_trade > 0:
                     old_cost = self.cost_basis.get(symbol, 0) * current_shares
                     new_cost = shares_to_trade * price
                     self.cost_basis[symbol] = (old_cost + new_cost) / new_shares if new_shares > 0 else price
-                
-                # 거래비용(추후 일괄 차감) 계산
-                trade_cost = abs(traded_value) * self.transaction_cost_rate
+
+                # 거래비용 (base currency 기준)
+                trade_cost = abs(traded_value_base) * self.transaction_cost_rate
                 total_trade_cost += trade_cost
-                
+
                 trades.append({
                     'symbol': symbol,
                     'shares': shares_to_trade,
                     'price': price,
-                    'value': diff_value,
+                    'value': diff_value_base,
                     'transaction_cost': trade_cost,
                     'current_shares': current_shares,
                     'target_shares': current_shares + shares_to_trade
                 })
-        
+
         # 거래가 있었을 때만 거래비용 차감
         if total_traded_value > 0:
             self.cash -= total_trade_cost
             self.total_transaction_cost += total_trade_cost
-        
+
         event = {
             'date': date,
             'portfolio_value': total_value,
@@ -286,69 +330,75 @@ class PortfolioBacktester:
     
     def _process_withdrawal(self, date: pd.Timestamp, dividend_cash: float) -> Dict:
         """인출 처리
-        
+
         분기별 인출: 연간 인출률 / 4
         배당금이 있으면 우선 사용, 부족분은 포트폴리오에서 매도
+        모든 금액은 base currency 기준.
         """
         # 분기별 인출액 (연 5% / 4 = 1.25%)
         if self.rebalance_frequency == 'quarterly':
             withdrawal_rate = self.withdrawal_rate / 4
         else:
             withdrawal_rate = self.withdrawal_rate
-        
-        portfolio_value = self._get_portfolio_value(date)
+
+        portfolio_value = self._get_portfolio_value(date)  # base currency
         target_withdrawal = portfolio_value * withdrawal_rate
-        
+
         # 인출 전 현금(배당 포함)에서 먼저 사용
         from_cash = min(self.cash, target_withdrawal)
         self.cash -= from_cash
         remaining = target_withdrawal - from_cash
-        
+
         from_portfolio = 0.0
         trade_cost = 0.0
-        
+
         # 부족분은 포트폴리오 비례 매도 → 현금 유입 후 인출
         if remaining > 0:
             for symbol, shares in list(self.holdings.items()):
                 if remaining <= 0:
                     break
-                
+
                 price = self._get_price(symbol, date)
                 if not price or shares <= 0:
                     continue
-                
+
+                fx_rate = self._get_fx_rate(symbol, date)
                 weight = self.allocation.get(symbol, 0)
-                sell_value = remaining * weight
-                sell_shares = min(sell_value / price, shares)
-                
+                sell_value_base = remaining * weight
+                sell_shares = min(sell_value_base / (price * fx_rate), shares)
+
                 if sell_shares > 0:
+                    # 양도차익 (native currency 기준)
                     avg_cost = self.cost_basis.get(symbol, price)
                     gain = sell_shares * (price - avg_cost)
-                    self.tax_calculator.record_capital_gain(gain, date)
-                    
-                    sell_amount = sell_shares * price
-                    cost = sell_amount * self.transaction_cost_rate
+                    market = self._get_market(symbol)
+                    tax_event = self.tax_calculator.record_capital_gain(gain, date, market=market)
+                    # KR_OTHER 즉시 과세
+                    if tax_event:
+                        self.cash -= tax_event.tax_amount * fx_rate
+
+                    sell_amount_base = sell_shares * price * fx_rate
+                    cost = sell_amount_base * self.transaction_cost_rate
                     trade_cost += cost
-                    
+
                     self.holdings[symbol] -= sell_shares
-                    
-                    from_portfolio += sell_amount
-                    remaining -= sell_amount
-                    
-                    # 매도 대금을 현금에 더하고, 인출은 전체 target에서 이미 차감됨
-                    self.cash += sell_amount
-        
+
+                    from_portfolio += sell_amount_base
+                    remaining -= sell_amount_base
+
+                    self.cash += sell_amount_base
+
         # 인출 금액 차감 (매도/현금 합쳐서 target_withdrawal만큼 감소)
-        self.cash -= remaining if remaining > 0 else 0  # 남은 부분도 차감
-        
+        self.cash -= remaining if remaining > 0 else 0
+
         # 거래비용 차감
         self.cash -= trade_cost
         self.total_transaction_cost += trade_cost
-        
+
         event = {
             'date': date,
             'target_withdrawal': target_withdrawal,
-            'from_dividend': from_cash,  # 현금(배당 포함) 사용분
+            'from_dividend': from_cash,
             'from_portfolio': from_portfolio,
             'total_withdrawal': target_withdrawal,
             'transaction_cost': trade_cost
@@ -358,36 +408,43 @@ class PortfolioBacktester:
     
     def _process_dividends(self, start_date: pd.Timestamp, end_date: pd.Timestamp) -> float:
         """기간 내 배당금 처리
-        
-        배당소득세를 차감한 순 배당금을 반환합니다.
+
+        배당소득세를 차감한 순 배당금(base currency)을 반환합니다.
         """
-        total_net_dividend = 0.0
-        
+        total_net_dividend_base = 0.0
+
         for symbol, shares in self.holdings.items():
             if shares <= 0:
                 continue
-            
+
             dividends = self._get_dividends(symbol, start_date, end_date)
-            
+            market = self._get_market(symbol)
+
             for div_date, div_per_share in dividends.items():
-                gross_dividend = shares * div_per_share
-                tax_event = self.tax_calculator.calculate_dividend_tax(gross_dividend, div_date)
-                net_dividend = tax_event.net_amount
-                total_net_dividend += net_dividend
-                
+                gross_dividend = shares * div_per_share  # native currency
+                tax_event = self.tax_calculator.calculate_dividend_tax(
+                    gross_dividend, div_date, market=market
+                )
+                net_dividend = tax_event.net_amount  # native currency
+
+                # base currency로 변환
+                fx_rate = self._get_fx_rate(symbol, div_date)
+                net_dividend_base = net_dividend * fx_rate
+                total_net_dividend_base += net_dividend_base
+
                 self.dividend_events.append({
                     'date': div_date,
                     'symbol': symbol,
                     'shares': shares,
                     'div_per_share': div_per_share,
-                    'gross_dividend': gross_dividend,
-                    'tax': tax_event.tax_amount,
-                    'net_dividend': net_dividend
+                    'gross_dividend': gross_dividend * fx_rate,
+                    'tax': tax_event.tax_amount * fx_rate,
+                    'net_dividend': net_dividend_base
                 })
-        
-        # 배당금 현금 유입
-        self.cash += total_net_dividend
-        return total_net_dividend
+
+        # 배당금 현금 유입 (base currency)
+        self.cash += total_net_dividend_base
+        return total_net_dividend_base
     
     def _process_year_end_tax(self, year: int, date: pd.Timestamp) -> float:
         """연말 양도소득세 정산"""
@@ -616,8 +673,9 @@ class PortfolioBacktester:
             cumulative_tax=cumulative_tax
         ))
 
-        # 거래일 순회
-        all_dates = self._price_data[symbols[0]].index
+        # 거래일 순회 (모든 ETF 거래일의 합집합)
+        all_date_sets = [df.index for df in self._price_data.values()]
+        all_dates = sorted(set().union(*all_date_sets)) if all_date_sets else []
         prev_rebalance_date = None
         prev_year = None
         initial_invested = False
@@ -697,28 +755,29 @@ class PortfolioBacktester:
 
     def _execute_initial_purchase(self, date: pd.Timestamp) -> bool:
         """초기 매수 실행"""
-        total_invested = 0.0
+        total_invested_base = 0.0
         initial_trades = []
 
         for symbol, weight in self.allocation.items():
             price = self._get_price(symbol, date)
             if price:
-                value = self.initial_capital * weight
-                shares = value / price
+                fx_rate = self._get_fx_rate(symbol, date)
+                value_base = self.initial_capital * weight  # base currency
+                shares = value_base / (price * fx_rate)
                 self.holdings[symbol] = shares
-                self.cost_basis[symbol] = price
-                total_invested += value
+                self.cost_basis[symbol] = price  # native currency
+                total_invested_base += value_base
                 initial_trades.append({
                     'symbol': symbol,
                     'shares': shares,
                     'price': price,
-                    'value': value,
+                    'value': value_base,
                     'transaction_cost': 0.0,
                     'current_shares': 0.0,
                     'target_shares': shares
                 })
 
-        self.cash = self.initial_capital - total_invested
+        self.cash = self.initial_capital - total_invested_base
 
         self.rebalance_events.append({
             'date': date,
@@ -801,9 +860,10 @@ class PortfolioBacktester:
         history_df = self.get_portfolio_history_df(result)
         history_df['year'] = history_df['date'].dt.year
 
-        # 세금 집계: 배당세는 해당 연도, 양도소득세는 다음 연도(이연 납부)로 매핑
+        # 세금 집계: 배당세/KR즉시과세는 해당 연도, US 양도소득세는 다음 연도(이연 납부)로 매핑
         dividend_tax_by_year: Dict[int, float] = {}
         capital_tax_payment_by_year: Dict[int, float] = {}
+        kr_capital_tax_by_year: Dict[int, float] = {}
         for event in result.tax_events:
             event_year = event.date.year
             if event.tax_type == 'dividend':
@@ -811,6 +871,8 @@ class PortfolioBacktester:
             elif event.tax_type == 'capital_gains':
                 payment_year = event_year + 1  # 다음 연도에 납부
                 capital_tax_payment_by_year[payment_year] = capital_tax_payment_by_year.get(payment_year, 0.0) + event.tax_amount
+            elif event.tax_type == 'kr_capital_gains':
+                kr_capital_tax_by_year[event_year] = kr_capital_tax_by_year.get(event_year, 0.0) + event.tax_amount
 
         annual_data = []
         years = sorted(history_df['year'].unique())
@@ -855,6 +917,7 @@ class PortfolioBacktester:
 
             year_dividend_tax = dividend_tax_by_year.get(year, 0.0)
             year_capital_tax = capital_tax_payment_by_year.get(year, 0.0)
+            year_kr_capital_tax = kr_capital_tax_by_year.get(year, 0.0)
             
             # 연간 거래비용: 리밸런싱/인출에서 누적된 total_transaction_cost가 없으므로
             # 연간 현금 흐름으로 추정할 수 없어서 별도 추적 필요.
@@ -875,6 +938,7 @@ class PortfolioBacktester:
                 'dividend_net': year_dividend_net,
                 'tax_dividend': year_dividend_tax,
                 'tax_capital_gains': year_capital_tax,
+                'tax_kr_capital_gains': year_kr_capital_tax,
                 'transaction_cost': year_trade_cost
             })
         

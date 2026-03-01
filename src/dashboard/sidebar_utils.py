@@ -6,7 +6,7 @@
 """
 import streamlit as st
 from dataclasses import dataclass
-from config.settings import ETF_BACKTEST_DEFAULTS
+from config.settings import ETF_BACKTEST_DEFAULTS, KOREAN_TAX_DEFAULTS
 
 
 @dataclass
@@ -19,6 +19,8 @@ class BacktestSettings:
     dividend_tax_rate: float
     capital_gains_tax_rate: float
     transaction_cost_rate: float
+    kr_dividend_tax_rate: float = 0.154
+    kr_capital_gains_rate: float = 0.154
 
 
 def render_common_sidebar(key_prefix: str = "") -> BacktestSettings:
@@ -79,6 +81,8 @@ def render_common_sidebar(key_prefix: str = "") -> BacktestSettings:
     st.markdown("---")
     st.subheader("세금 설정")
 
+    st.caption("해외 상장 ETF")
+
     # 배당소득세
     dividend_tax_rate = st.number_input(
         "배당소득세 (%)",
@@ -87,7 +91,7 @@ def render_common_sidebar(key_prefix: str = "") -> BacktestSettings:
         value=ETF_BACKTEST_DEFAULTS['dividend_tax_rate'] * 100,
         step=1.0,
         key=f"{key_prefix}dividend_tax" if key_prefix else None,
-        help="배당금에 부과되는 세율"
+        help="해외 ETF 배당금에 부과되는 세율"
     ) / 100
 
     # 양도소득세
@@ -98,8 +102,31 @@ def render_common_sidebar(key_prefix: str = "") -> BacktestSettings:
         value=ETF_BACKTEST_DEFAULTS['capital_gains_tax_rate'] * 100,
         step=1.0,
         key=f"{key_prefix}capital_gains_tax" if key_prefix else None,
-        help="양도차익에 부과되는 세율 (연말 정산, 다음해 차감)"
+        help="해외 ETF 양도차익 세율 (연말 정산, 다음해 차감)"
     ) / 100
+
+    with st.expander("국내 상장 ETF 세금", expanded=False):
+        kr_dividend_tax_rate = st.number_input(
+            "국내 배당소득세 (%)",
+            min_value=0.0,
+            max_value=50.0,
+            value=KOREAN_TAX_DEFAULTS['kr_dividend_tax_rate'] * 100,
+            step=0.1,
+            key=f"{key_prefix}kr_dividend_tax" if key_prefix else None,
+            help="국내 ETF 배당소득세 (소득세 14% + 지방소득세 1.4%)"
+        ) / 100
+
+        kr_capital_gains_rate = st.number_input(
+            "국내 기타 ETF 매매차익 세율 (%)",
+            min_value=0.0,
+            max_value=50.0,
+            value=KOREAN_TAX_DEFAULTS['kr_other_capital_gains_rate'] * 100,
+            step=0.1,
+            key=f"{key_prefix}kr_capital_gains_tax" if key_prefix else None,
+            help="국내 기타 ETF (해외/채권/원자재) 매매차익 배당소득세"
+        ) / 100
+
+        st.caption("국내 주식형 ETF 양도차익은 비과세")
 
     st.markdown("---")
     st.subheader("거래비용 설정")
@@ -122,5 +149,7 @@ def render_common_sidebar(key_prefix: str = "") -> BacktestSettings:
         withdrawal_rate=withdrawal_rate,
         dividend_tax_rate=dividend_tax_rate,
         capital_gains_tax_rate=capital_gains_tax_rate,
-        transaction_cost_rate=transaction_cost_rate
+        transaction_cost_rate=transaction_cost_rate,
+        kr_dividend_tax_rate=kr_dividend_tax_rate,
+        kr_capital_gains_rate=kr_capital_gains_rate
     )
