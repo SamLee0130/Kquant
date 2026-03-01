@@ -360,8 +360,10 @@ def show_allocation_backtest_page():
         )
 
 
-def _render_performance_metrics(result: BacktestResult):
+def _render_performance_metrics(result: BacktestResult, allocation: dict):
     """주요 성과 지표 렌더링 (분석 기간 + 3행 메트릭)"""
+
+    sym = _currency_symbol(allocation)
 
     # 분석 기간 표시
     if result.portfolio_history:
@@ -376,19 +378,19 @@ def _render_performance_metrics(result: BacktestResult):
     with row1_col1:
         st.metric(
             "최종 자산",
-            f"${result.final_value:,.0f}",
+            f"{sym}{result.final_value:,.0f}",
             delta=f"{result.total_return:+.1f}%"
         )
     with row1_col2:
         st.metric(
             "총 인출금",
-            f"${result.total_withdrawal:,.0f}",
+            f"{sym}{result.total_withdrawal:,.0f}",
             help="백테스트 기간 동안 인출한 총 금액"
         )
     with row1_col3:
         st.metric(
             "총 배당금",
-            f"${result.total_dividend_net:,.0f}",
+            f"{sym}{result.total_dividend_net:,.0f}",
             help="수령한 총 배당금 (세후)"
         )
 
@@ -406,32 +408,32 @@ def _render_performance_metrics(result: BacktestResult):
     with row2_cols[0]:
         st.metric(
             "총 세금",
-            f"${result.total_tax:,.0f}",
+            f"{sym}{result.total_tax:,.0f}",
             help="배당소득세 + 양도소득세 + 국내 기타 ETF 매매차익세"
         )
     with row2_cols[1]:
         st.metric(
             "총 세금(배당)",
-            f"${dividend_tax:,.0f}",
+            f"{sym}{dividend_tax:,.0f}",
             help="배당소득세 합계"
         )
     with row2_cols[2]:
         st.metric(
             "총 세금(양도)",
-            f"${capital_gains_tax:,.0f}",
+            f"{sym}{capital_gains_tax:,.0f}",
             help="해외 ETF 양도소득세 합계"
         )
     if has_kr_tax:
         with row2_cols[3]:
             st.metric(
                 "총 세금(국내 매매)",
-                f"${kr_capital_gains_tax:,.0f}",
+                f"{sym}{kr_capital_gains_tax:,.0f}",
                 help="국내 기타 ETF 매매차익 배당소득세 합계"
             )
     with row2_cols[-1]:
         st.metric(
             "총 거래비용",
-            f"${result.total_transaction_cost:,.0f}",
+            f"{sym}{result.total_transaction_cost:,.0f}",
             help="거래수수료 + 슬리피지"
         )
 
@@ -463,8 +465,11 @@ def _render_performance_metrics(result: BacktestResult):
         )
 
 
-def _render_portfolio_chart(history_df: pd.DataFrame, result: BacktestResult):
+def _render_portfolio_chart(history_df: pd.DataFrame, result: BacktestResult, allocation: dict):
     """포트폴리오 가치 추이 차트 렌더링"""
+
+    sym = _currency_symbol(allocation)
+    lbl = _currency_label(allocation)
 
     st.subheader("포트폴리오 가치 추이")
 
@@ -493,13 +498,13 @@ def _render_portfolio_chart(history_df: pd.DataFrame, result: BacktestResult):
         y=result.initial_value,
         line_dash="dot",
         line_color="gray",
-        annotation_text=f"초기 자본: ${result.initial_value:,.0f}"
+        annotation_text=f"초기 자본: {sym}{result.initial_value:,.0f}"
     )
 
     fig.update_layout(
         title="포트폴리오 가치 및 누적 인출금",
         xaxis_title="날짜",
-        yaxis_title="금액 (USD)",
+        yaxis_title=f"금액 ({lbl})",
         height=400,
         hovermode='x unified',
         legend=dict(
@@ -514,8 +519,10 @@ def _render_portfolio_chart(history_df: pd.DataFrame, result: BacktestResult):
     st.plotly_chart(fig, use_container_width=True)
 
 
-def _render_allocation_chart(history_df: pd.DataFrame):
+def _render_allocation_chart(history_df: pd.DataFrame, allocation: dict):
     """자산별 비중 변화 (Stacked Area) 차트 렌더링"""
+
+    lbl = _currency_label(allocation)
 
     st.subheader("자산별 비중 변화")
 
@@ -542,7 +549,7 @@ def _render_allocation_chart(history_df: pd.DataFrame):
         fig.update_layout(
             title="자산별 가치 변화",
             xaxis_title="날짜",
-            yaxis_title="금액 (USD)",
+            yaxis_title=f"금액 ({lbl})",
             height=400,
             hovermode='x unified',
             legend=dict(
@@ -603,8 +610,10 @@ def _render_annual_summary(annual_df: pd.DataFrame):
         st.dataframe(display_df, use_container_width=True, hide_index=True)
 
 
-def _render_withdrawal_dividend(result: BacktestResult):
+def _render_withdrawal_dividend(result: BacktestResult, allocation: dict):
     """인출금 vs 배당금 비교 차트 렌더링"""
+
+    lbl = _currency_label(allocation)
 
     st.subheader("인출금 vs 배당금")
 
@@ -631,7 +640,7 @@ def _render_withdrawal_dividend(result: BacktestResult):
             fig.update_layout(
                 title="인출금 구성",
                 xaxis_title="날짜",
-                yaxis_title="금액 (USD)",
+                yaxis_title=f"금액 ({lbl})",
                 barmode='stack',
                 height=350
             )
@@ -665,7 +674,7 @@ def _render_withdrawal_dividend(result: BacktestResult):
             fig.update_layout(
                 title="월별 배당금 및 세금",
                 xaxis_title="날짜",
-                yaxis_title="금액 (USD)",
+                yaxis_title=f"금액 ({lbl})",
                 barmode='stack',
                 height=350
             )
@@ -790,19 +799,21 @@ def display_backtest_results(result: BacktestResult, backtester: PortfolioBackte
     st.markdown("---")
     st.subheader("백테스트 결과")
 
-    _render_performance_metrics(result)
+    allocation = backtester.allocation
+
+    _render_performance_metrics(result, allocation)
 
     st.markdown("---")
     history_df = backtester.get_portfolio_history_df(result)
 
-    _render_portfolio_chart(history_df, result)
-    _render_allocation_chart(history_df)
+    _render_portfolio_chart(history_df, result, allocation)
+    _render_allocation_chart(history_df, allocation)
 
     st.subheader("구성 종목별 성과")
     display_etf_performance(backtester)
 
     _render_annual_summary(backtester.get_annual_summary_df(result))
-    _render_withdrawal_dividend(result)
+    _render_withdrawal_dividend(result, allocation)
     _render_tax_summary(result)
     _render_detail_logs(result)
 
