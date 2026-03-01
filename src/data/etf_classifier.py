@@ -161,6 +161,15 @@ def has_mixed_currencies(etf_info: Dict[str, ETFInfo]) -> bool:
     return len(currencies) > 1
 
 
+def needs_currency_conversion(etf_info: Dict[str, ETFInfo], base_currency: str) -> bool:
+    """포트폴리오 내 ETF 중 base_currency와 다른 통화가 있는지 확인
+
+    has_mixed_currencies()와 달리 사용자가 선택한 기준 통화를 기준으로 판단합니다.
+    예: base_currency="USD"인데 한국 ETF만 있으면 True (변환 필요).
+    """
+    return any(info.currency != base_currency for info in etf_info.values())
+
+
 def get_tax_label(market: Market) -> str:
     """세금 유형 레이블 반환 (UI 표시용)"""
     labels = {

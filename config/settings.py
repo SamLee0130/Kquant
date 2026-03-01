@@ -50,6 +50,14 @@ KOREAN_TAX_DEFAULTS = {
     "kr_stock_capital_gains_rate": 0.0,     # 국내주식형 ETF 양도차익 비과세
 }
 
+# 기준 통화 설정
+CURRENCY_DEFAULTS = {
+    "base_currencies": ["KRW", "USD"],
+    "default_base_currency": "KRW",
+    "default_capital_krw": 1_000_000_000,  # ₩10억
+    "default_capital_usd": 1_000_000,       # $1M
+}
+
 # 한국 ETF 프리셋 포트폴리오
 KOREAN_ETF_PRESETS = {
     "국내주식형": {

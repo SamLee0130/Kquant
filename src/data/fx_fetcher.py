@@ -13,7 +13,7 @@ from typing import Optional
 
 logger = logging.getLogger(__name__)
 
-MAX_RETRIES = 3
+MAX_RETRIES = 5
 RETRY_BASE_DELAY = 1.0
 
 

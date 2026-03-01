@@ -17,7 +17,7 @@ from src.backtest.backtest_utils import summarize_tax_events
 from src.dashboard.sidebar_utils import render_common_sidebar
 from src.data.etf_classifier import (
     classify_portfolio, normalize_ticker, is_korean_ticker,
-    has_mixed_currencies, get_tax_label
+    needs_currency_conversion, get_tax_label
 )
 from src.data.fx_fetcher import CurrencyConverter
 from config.settings import ETF_BACKTEST_DEFAULTS, KOREAN_ETF_PRESETS
@@ -30,14 +30,14 @@ def _has_korean_etfs(allocation: dict) -> bool:
     return any(is_korean_ticker(symbol) for symbol in allocation)
 
 
-def _currency_symbol(allocation: dict) -> str:
-    """포트폴리오 기반 통화 기호 반환"""
-    return "₩" if _has_korean_etfs(allocation) else "$"
+def _currency_symbol(base_currency: str) -> str:
+    """기준 통화 기호 반환"""
+    return "₩" if base_currency == "KRW" else "$"
 
 
-def _currency_label(allocation: dict) -> str:
-    """포트폴리오 기반 통화 레이블 반환"""
-    return "KRW" if _has_korean_etfs(allocation) else "USD"
+def _currency_label(base_currency: str) -> str:
+    """기준 통화 레이블 반환"""
+    return base_currency
 
 
 def calculate_dividend_yield(price_data: dict, dividend_data: dict, symbols: list) -> pd.DataFrame:
@@ -204,7 +204,8 @@ def show_allocation_backtest_page():
     dividend_tax_rate = settings.dividend_tax_rate
     capital_gains_tax_rate = settings.capital_gains_tax_rate
     transaction_cost_rate = settings.transaction_cost_rate
-    
+    base_currency = settings.base_currency
+
     # 메인 영역 - 자산 배분 설정
     st.subheader("자산 배분 설정")
 
@@ -327,8 +328,8 @@ def show_allocation_backtest_page():
                 # ETF 분류 및 환율 변환기 생성
                 portfolio_etf_info = classify_portfolio(allocation)
                 converter = None
-                if has_mixed_currencies(portfolio_etf_info):
-                    converter = CurrencyConverter(base_currency="KRW")
+                if needs_currency_conversion(portfolio_etf_info, base_currency):
+                    converter = CurrencyConverter(base_currency=base_currency)
 
                 # 백테스터 생성 및 실행
                 backtester = PortfolioBacktester(
@@ -350,7 +351,8 @@ def show_allocation_backtest_page():
                 # 결과 저장
                 st.session_state.backtest_result = result
                 st.session_state.backtester = backtester
-                
+                st.session_state.backtest_base_currency = base_currency
+
                 st.success("백테스트 완료!")
                 
             except Exception as e:
@@ -362,14 +364,15 @@ def show_allocation_backtest_page():
     if 'backtest_result' in st.session_state:
         display_backtest_results(
             st.session_state.backtest_result,
-            st.session_state.backtester
+            st.session_state.backtester,
+            st.session_state.get('backtest_base_currency', 'USD')
         )
 
 
-def _render_performance_metrics(result: BacktestResult, allocation: dict):
+def _render_performance_metrics(result: BacktestResult, base_currency: str):
     """주요 성과 지표 렌더링 (분석 기간 + 3행 메트릭)"""
 
-    sym = _currency_symbol(allocation)
+    sym = _currency_symbol(base_currency)
 
     # 분석 기간 표시
     if result.portfolio_history:
@@ -471,11 +474,11 @@ def _render_performance_metrics(result: BacktestResult, allocation: dict):
         )
 
 
-def _render_portfolio_chart(history_df: pd.DataFrame, result: BacktestResult, allocation: dict):
+def _render_portfolio_chart(history_df: pd.DataFrame, result: BacktestResult, base_currency: str):
     """포트폴리오 가치 추이 차트 렌더링"""
 
-    sym = _currency_symbol(allocation)
-    lbl = _currency_label(allocation)
+    sym = _currency_symbol(base_currency)
+    lbl = _currency_label(base_currency)
 
     st.subheader("포트폴리오 가치 추이")
 
@@ -525,10 +528,10 @@ def _render_portfolio_chart(history_df: pd.DataFrame, result: BacktestResult, al
     st.plotly_chart(fig, use_container_width=True)
 
 
-def _render_allocation_chart(history_df: pd.DataFrame, allocation: dict):
+def _render_allocation_chart(history_df: pd.DataFrame, base_currency: str):
     """자산별 비중 변화 (Stacked Area) 차트 렌더링"""
 
-    lbl = _currency_label(allocation)
+    lbl = _currency_label(base_currency)
 
     st.subheader("자산별 비중 변화")
 
@@ -570,10 +573,10 @@ def _render_allocation_chart(history_df: pd.DataFrame, allocation: dict):
         st.plotly_chart(fig, use_container_width=True)
 
 
-def _render_annual_summary(annual_df: pd.DataFrame, allocation: dict):
+def _render_annual_summary(annual_df: pd.DataFrame, base_currency: str):
     """연간 성과 요약 테이블 렌더링"""
 
-    sym = _currency_symbol(allocation)
+    sym = _currency_symbol(base_currency)
 
     st.subheader("연간 성과 요약")
 
@@ -618,10 +621,10 @@ def _render_annual_summary(annual_df: pd.DataFrame, allocation: dict):
         st.dataframe(display_df, use_container_width=True, hide_index=True)
 
 
-def _render_withdrawal_dividend(result: BacktestResult, allocation: dict):
+def _render_withdrawal_dividend(result: BacktestResult, base_currency: str):
     """인출금 vs 배당금 비교 차트 렌더링"""
 
-    lbl = _currency_label(allocation)
+    lbl = _currency_label(base_currency)
 
     st.subheader("인출금 vs 배당금")
 
@@ -690,10 +693,10 @@ def _render_withdrawal_dividend(result: BacktestResult, allocation: dict):
             st.plotly_chart(fig, use_container_width=True)
 
 
-def _render_tax_summary(result: BacktestResult, allocation: dict):
+def _render_tax_summary(result: BacktestResult, base_currency: str):
     """세금 요약 및 파이 차트 렌더링"""
 
-    sym = _currency_symbol(allocation)
+    sym = _currency_symbol(base_currency)
 
     st.subheader("세금 요약")
 
@@ -745,10 +748,11 @@ def _render_tax_summary(result: BacktestResult, allocation: dict):
         st.plotly_chart(fig, use_container_width=True)
 
 
-def _render_detail_logs(result: BacktestResult, allocation: dict):
+def _render_detail_logs(result: BacktestResult, base_currency: str):
     """상세 리밸런싱/배당금 로그 렌더링"""
 
-    sym = _currency_symbol(allocation)
+    # st.markdown에서 $가 LaTeX로 해석되지 않도록 이스케이프
+    sym = _currency_symbol(base_currency).replace("$", r"\$")
 
     with st.expander("상세 리밸런싱 로그"):
         if result.rebalance_events:
@@ -780,17 +784,20 @@ def _render_detail_logs(result: BacktestResult, allocation: dict):
                         action = "매수" if trade['shares'] > 0 else "매도"
                         action_symbol = "+" if trade['shares'] > 0 else "-"
 
+                        # 개별 종목 가격은 native 통화, 거래 금액은 base 통화
+                        native_sym = ("₩" if is_korean_ticker(trade['symbol']) else r"\$")
+
                         # 현재/목표 보유량 표시 (있는 경우)
                         if 'current_shares' in trade and 'target_shares' in trade:
                             st.markdown(
                                 f"  - {trade['symbol']}: {round(trade['current_shares']):,}주 → "
                                 f"{round(trade['target_shares']):,}주 ({action_symbol}{round(abs(trade['shares'])):,}주 {action}) "
-                                f"× {sym}{trade['price']:,.2f} = {sym}{abs(trade['value']):,.0f}"
+                                f"× {native_sym}{trade['price']:,.2f} = {sym}{abs(trade['value']):,.0f}"
                             )
                         else:
                             st.markdown(
                                 f"  - {trade['symbol']}: {action} {round(abs(trade['shares'])):,}주 "
-                                f"× {sym}{trade['price']:,.2f} = {sym}{abs(trade['value']):,.0f}"
+                                f"× {native_sym}{trade['price']:,.2f} = {sym}{abs(trade['value']):,.0f}"
                             )
                 else:
                     st.markdown("  - 거래 없음 (목표 비율 유지)")
@@ -805,27 +812,25 @@ def _render_detail_logs(result: BacktestResult, allocation: dict):
             st.dataframe(div_summary, use_container_width=True, hide_index=True)
 
 
-def display_backtest_results(result: BacktestResult, backtester: PortfolioBacktester):
+def display_backtest_results(result: BacktestResult, backtester: PortfolioBacktester, base_currency: str = "USD"):
     """백테스트 결과 표시"""
 
     st.markdown("---")
     st.subheader("백테스트 결과")
 
-    allocation = backtester.allocation
-
-    _render_performance_metrics(result, allocation)
+    _render_performance_metrics(result, base_currency)
 
     st.markdown("---")
     history_df = backtester.get_portfolio_history_df(result)
 
-    _render_portfolio_chart(history_df, result, allocation)
-    _render_allocation_chart(history_df, allocation)
+    _render_portfolio_chart(history_df, result, base_currency)
+    _render_allocation_chart(history_df, base_currency)
 
     st.subheader("구성 종목별 성과")
     display_etf_performance(backtester)
 
-    _render_annual_summary(backtester.get_annual_summary_df(result), allocation)
-    _render_withdrawal_dividend(result, allocation)
-    _render_tax_summary(result, allocation)
-    _render_detail_logs(result, allocation)
+    _render_annual_summary(backtester.get_annual_summary_df(result), base_currency)
+    _render_withdrawal_dividend(result, base_currency)
+    _render_tax_summary(result, base_currency)
+    _render_detail_logs(result, base_currency)
 

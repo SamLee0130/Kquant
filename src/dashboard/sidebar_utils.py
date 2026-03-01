@@ -6,13 +6,14 @@
 """
 import streamlit as st
 from dataclasses import dataclass
-from config.settings import ETF_BACKTEST_DEFAULTS, KOREAN_TAX_DEFAULTS
+from config.settings import ETF_BACKTEST_DEFAULTS, KOREAN_TAX_DEFAULTS, CURRENCY_DEFAULTS
 
 
 @dataclass
 class BacktestSettings:
     """백테스트 설정 값"""
     initial_capital: float
+    base_currency: str
     backtest_years: int
     rebalance_freq: str
     withdrawal_rate: float
@@ -34,13 +35,28 @@ def render_common_sidebar(key_prefix: str = "") -> BacktestSettings:
     """
     st.subheader("백테스트 설정" if not key_prefix else "공통 설정")
 
-    # 초기 자본
+    # 기준 통화
+    base_currency = st.selectbox(
+        "기준 통화",
+        options=CURRENCY_DEFAULTS["base_currencies"],
+        index=0,  # KRW 기본값
+        key=f"{key_prefix}base_currency" if key_prefix else "base_currency",
+        help="포트폴리오 가치를 표시할 기준 통화. 혼합 포트폴리오는 이 통화로 환산됩니다."
+    )
+
+    # 초기 자본 (기준 통화에 따라 동적 변경)
+    is_krw = base_currency == "KRW"
+    capital_label = f"초기 자본 ({base_currency})"
+    capital_default = CURRENCY_DEFAULTS["default_capital_krw"] if is_krw else CURRENCY_DEFAULTS["default_capital_usd"]
+    capital_max = 100_000_000_000 if is_krw else 100_000_000
+    capital_step = 100_000_000 if is_krw else 100_000
+
     initial_capital = st.number_input(
-        "초기 자본 (USD)",
+        capital_label,
         min_value=10_000,
-        max_value=100_000_000,
-        value=ETF_BACKTEST_DEFAULTS['initial_capital'],
-        step=100_000,
+        max_value=capital_max,
+        value=capital_default,
+        step=capital_step,
         format="%d",
         key=f"{key_prefix}initial_capital" if key_prefix else None,
         help="백테스트 시작 시 투자할 초기 자본금"
@@ -144,6 +160,7 @@ def render_common_sidebar(key_prefix: str = "") -> BacktestSettings:
 
     return BacktestSettings(
         initial_capital=initial_capital,
+        base_currency=base_currency,
         backtest_years=backtest_years,
         rebalance_freq=rebalance_freq,
         withdrawal_rate=withdrawal_rate,

@@ -15,7 +15,7 @@ from src.backtest.backtest_utils import summarize_tax_events
 from src.dashboard.sidebar_utils import render_common_sidebar
 from src.data.etf_classifier import (
     classify_portfolio, normalize_ticker, is_korean_ticker,
-    has_mixed_currencies
+    needs_currency_conversion
 )
 from src.data.fx_fetcher import CurrencyConverter
 from config.settings import ETF_BACKTEST_DEFAULTS
@@ -26,23 +26,14 @@ logger = logging.getLogger(__name__)
 PORTFOLIO_COLORS = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd']
 
 
-def _has_any_korean_etfs(allocations: List[Dict[str, float]]) -> bool:
-    """어떤 포트폴리오라도 한국 ETF를 포함하는지 확인"""
-    return any(
-        is_korean_ticker(symbol)
-        for alloc in allocations
-        for symbol in alloc
-    )
+def _comp_currency_symbol(base_currency: str) -> str:
+    """기준 통화 기호 반환"""
+    return "₩" if base_currency == "KRW" else "$"
 
 
-def _comp_currency_symbol(allocations: List[Dict[str, float]]) -> str:
-    """비교 포트폴리오들의 통화 기호 반환"""
-    return "₩" if _has_any_korean_etfs(allocations) else "$"
-
-
-def _comp_currency_label(allocations: List[Dict[str, float]]) -> str:
-    """비교 포트폴리오들의 통화 레이블 반환"""
-    return "KRW" if _has_any_korean_etfs(allocations) else "USD"
+def _comp_currency_label(base_currency: str) -> str:
+    """기준 통화 레이블 반환"""
+    return base_currency
 
 
 def show_portfolio_comparison_page():
@@ -63,6 +54,7 @@ def show_portfolio_comparison_page():
     dividend_tax_rate = settings.dividend_tax_rate
     capital_gains_tax_rate = settings.capital_gains_tax_rate
     transaction_cost_rate = settings.transaction_cost_rate
+    base_currency = settings.base_currency
     
     # 포트폴리오 추가 활성화 여부 (메인 영역 상단)
     col_check1, col_check2, col_check3 = st.columns(3)
@@ -186,8 +178,8 @@ def show_portfolio_comparison_page():
             def _create_backtester(alloc):
                 etf_info = classify_portfolio(alloc)
                 converter = None
-                if has_mixed_currencies(etf_info):
-                    converter = CurrencyConverter(base_currency="KRW")
+                if needs_currency_conversion(etf_info, base_currency):
+                    converter = CurrencyConverter(base_currency=base_currency)
                 return PortfolioBacktester(
                     allocation=alloc,
                     etf_info=etf_info,
@@ -251,7 +243,8 @@ def show_portfolio_comparison_page():
             backtesters=backtesters,
             results=results,
             allocations=allocations,
-            initial_capital=initial_capital
+            initial_capital=initial_capital,
+            base_currency=base_currency
         )
 
 
@@ -312,8 +305,8 @@ def _render_portfolio_allocation(portfolio: dict, key_prefix: str) -> dict:
 
 def _render_summary_table(
     results: List[BacktestResult],
-    allocations: List[Dict[str, float]],
-    num_portfolios: int
+    num_portfolios: int,
+    base_currency: str
 ):
     """성과 요약 테이블 렌더링"""
 
@@ -325,7 +318,7 @@ def _render_summary_table(
         for r in results
     )
 
-    sym = _comp_currency_symbol(allocations)
+    sym = _comp_currency_symbol(base_currency)
 
     metrics_labels = [
         f"최종 자산 ({sym})",
@@ -390,7 +383,7 @@ def _render_summary_table(
 def _render_portfolio_value_chart(
     histories: List[pd.DataFrame],
     initial_capital: float,
-    allocations: List[Dict[str, float]] = None
+    base_currency: str = "USD"
 ):
     """포트폴리오 가치 추이 차트 렌더링"""
 
@@ -409,8 +402,8 @@ def _render_portfolio_value_chart(
         ))
 
     # 초기 자본 기준선
-    sym = _comp_currency_symbol(allocations) if allocations else "$"
-    lbl = _comp_currency_label(allocations) if allocations else "USD"
+    sym = _comp_currency_symbol(base_currency)
+    lbl = _comp_currency_label(base_currency)
     fig.add_hline(
         y=initial_capital,
         line_dash="dash",
@@ -523,7 +516,8 @@ def _display_comparison_results(
     backtesters: List[PortfolioBacktester],
     results: List[BacktestResult],
     allocations: List[Dict[str, float]],
-    initial_capital: float
+    initial_capital: float,
+    base_currency: str = "USD"
 ):
     """비교 결과 표시 (2~5개 포트폴리오 지원)"""
 
@@ -538,7 +532,7 @@ def _display_comparison_results(
         for alloc in allocations
     ]
 
-    _render_summary_table(results, allocations, num_portfolios)
+    _render_summary_table(results, num_portfolios, base_currency)
 
     # 포트폴리오 구성 표시
     cols = st.columns(num_portfolios)
@@ -552,6 +546,6 @@ def _display_comparison_results(
         for backtester, result in zip(backtesters, results)
     ]
 
-    _render_portfolio_value_chart(histories, initial_capital, allocations)
+    _render_portfolio_value_chart(histories, initial_capital, base_currency)
     _render_cumulative_returns_chart(histories, initial_capital)
     _render_annual_comparison_chart(backtesters, results)

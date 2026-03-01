@@ -16,24 +16,19 @@ import logging
 from src.optimizer.portfolio_optimizer import PortfolioOptimizer
 from src.backtest.portfolio_backtest import PortfolioBacktester
 from src.dashboard.sidebar_utils import render_common_sidebar
-from src.data.etf_classifier import classify_portfolio, has_mixed_currencies, is_korean_ticker
+from src.data.etf_classifier import classify_portfolio, needs_currency_conversion
 from src.data.fx_fetcher import CurrencyConverter
 from config.settings import ETF_BACKTEST_DEFAULTS, BACKTEST_CONSTANTS
 
 
-def _has_korean_etfs(allocation: dict) -> bool:
-    """포트폴리오에 한국 ETF가 포함되어 있는지 확인"""
-    return any(is_korean_ticker(symbol) for symbol in allocation)
+def _currency_symbol(base_currency: str) -> str:
+    """기준 통화 기호 반환"""
+    return "₩" if base_currency == "KRW" else "$"
 
 
-def _currency_symbol(allocation: dict) -> str:
-    """포트폴리오 기반 통화 기호 반환"""
-    return "₩" if _has_korean_etfs(allocation) else "$"
-
-
-def _currency_label(allocation: dict) -> str:
-    """포트폴리오 기반 통화 레이블 반환"""
-    return "KRW" if _has_korean_etfs(allocation) else "USD"
+def _currency_label(base_currency: str) -> str:
+    """기준 통화 레이블 반환"""
+    return base_currency
 
 logger = logging.getLogger(__name__)
 
@@ -365,8 +360,8 @@ def _display_backtest_section(weights: dict, settings):
                 # ETF 분류 및 환율 변환기 생성
                 etf_info = classify_portfolio(allocation)
                 converter = None
-                if has_mixed_currencies(etf_info):
-                    converter = CurrencyConverter(base_currency="KRW")
+                if needs_currency_conversion(etf_info, settings.base_currency):
+                    converter = CurrencyConverter(base_currency=settings.base_currency)
 
                 backtester = PortfolioBacktester(
                     initial_capital=settings.initial_capital,
@@ -385,14 +380,14 @@ def _display_backtest_section(weights: dict, settings):
                 result = backtester.run(years=settings.backtest_years)
 
             # 결과 표시
-            _display_backtest_results(result, backtester, allocation)
+            _display_backtest_results(result, backtester, settings.base_currency)
 
         except Exception as e:
             logger.error(f"Backtest error: {e}")
             st.error(f"백테스트 중 오류가 발생했습니다: {e}")
 
 
-def _display_backtest_results(result, backtester, allocation: dict):
+def _display_backtest_results(result, backtester, base_currency: str):
     """백테스트 결과 표시"""
     st.markdown("---")
     st.subheader("백테스트 결과")
@@ -426,7 +421,7 @@ def _display_backtest_results(result, backtester, allocation: dict):
 
     fig.update_layout(
         xaxis_title='날짜',
-        yaxis_title=f'가치 ({_currency_label(allocation)})',
+        yaxis_title=f'가치 ({_currency_label(base_currency)})',
         height=400,
         hovermode='x unified'
     )
@@ -446,7 +441,7 @@ def _display_backtest_results(result, backtester, allocation: dict):
             elif '%' in col or '수익률' in col:
                 display_df[col] = display_df[col].apply(lambda x: f"{x:.1f}%")
             else:
-                sym = _currency_symbol(allocation)
+                sym = _currency_symbol(base_currency)
                 display_df[col] = display_df[col].apply(lambda x, s=sym: f"{s}{x:,.0f}")
 
         st.dataframe(display_df, hide_index=True, use_container_width=True)
@@ -455,7 +450,7 @@ def _display_backtest_results(result, backtester, allocation: dict):
     st.markdown("**총계**")
     col1, col2, col3, col4 = st.columns(4)
 
-    sym = _currency_symbol(allocation)
+    sym = _currency_symbol(base_currency)
     with col1:
         st.metric("총 인출금", f"{sym}{result.total_withdrawal:,.0f}")
     with col2:

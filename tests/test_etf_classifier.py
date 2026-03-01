@@ -5,7 +5,7 @@ import pytest
 from src.data.etf_classifier import (
     Market, ETFInfo, classify_etf, normalize_ticker,
     is_korean_ticker, classify_portfolio, has_mixed_currencies,
-    get_tax_label, KOREAN_ETF_REGISTRY,
+    needs_currency_conversion, get_tax_label, KOREAN_ETF_REGISTRY,
 )
 
 
@@ -183,6 +183,49 @@ class TestHasMixedCurrencies:
             "360750.KS": ETFInfo("360750.KS", "TIGER S&P500", Market.KR_OTHER, "KRW"),
         }
         assert has_mixed_currencies(etf_info) is False
+
+
+class TestNeedsCurrencyConversion:
+    """needs_currency_conversion 함수 테스트"""
+
+    def test_usd_base_with_usd_etfs(self):
+        """USD 기준 + USD ETF만 → 변환 불필요"""
+        etf_info = {
+            "SPY": ETFInfo("SPY", "SPY", Market.US, "USD"),
+            "QQQ": ETFInfo("QQQ", "QQQ", Market.US, "USD"),
+        }
+        assert needs_currency_conversion(etf_info, "USD") is False
+
+    def test_krw_base_with_krw_etfs(self):
+        """KRW 기준 + KRW ETF만 → 변환 불필요"""
+        etf_info = {
+            "069500.KS": ETFInfo("069500.KS", "KODEX 200", Market.KR_STOCK, "KRW"),
+            "360750.KS": ETFInfo("360750.KS", "TIGER S&P500", Market.KR_OTHER, "KRW"),
+        }
+        assert needs_currency_conversion(etf_info, "KRW") is False
+
+    def test_krw_base_with_usd_etfs(self):
+        """KRW 기준 + USD ETF → 변환 필요"""
+        etf_info = {
+            "SPY": ETFInfo("SPY", "SPY", Market.US, "USD"),
+        }
+        assert needs_currency_conversion(etf_info, "KRW") is True
+
+    def test_usd_base_with_krw_etfs(self):
+        """USD 기준 + KRW ETF → 변환 필요"""
+        etf_info = {
+            "069500.KS": ETFInfo("069500.KS", "KODEX 200", Market.KR_STOCK, "KRW"),
+        }
+        assert needs_currency_conversion(etf_info, "USD") is True
+
+    def test_mixed_portfolio_any_base(self):
+        """혼합 포트폴리오 → 어떤 기준 통화든 변환 필요"""
+        etf_info = {
+            "SPY": ETFInfo("SPY", "SPY", Market.US, "USD"),
+            "069500.KS": ETFInfo("069500.KS", "KODEX 200", Market.KR_STOCK, "KRW"),
+        }
+        assert needs_currency_conversion(etf_info, "KRW") is True
+        assert needs_currency_conversion(etf_info, "USD") is True
 
 
 class TestGetTaxLabel:
