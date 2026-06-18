@@ -13,3 +13,6 @@ plotly>=5.17.0
 
 # 포트폴리오 최적화
 PyPortfolioOpt>=1.5.0
+
+# 한국 상장목록 (이름↔코드 검색)
+finance-datareader>=0.9.50
