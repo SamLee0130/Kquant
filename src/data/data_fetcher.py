@@ -131,6 +131,106 @@ def fetch_dividend_data(
 
 
 @st.cache_data(ttl=3600, show_spinner=False)
+def fetch_ticker_currency(ticker: str) -> str:
+    """티커의 거래 통화 조회 (yfinance fast_info, 캐싱)
+
+    Args:
+        ticker: 종목/ETF 심볼
+
+    Returns:
+        통화 코드 (예: "USD", "KRW", "EUR", "GBp")
+
+    Raises:
+        ValueError: 통화 정보를 가져올 수 없는 경우
+    """
+    fast_info = yf.Ticker(ticker).fast_info
+    currency = fast_info.get('currency') if hasattr(fast_info, 'get') else fast_info['currency']
+    if not currency:
+        raise ValueError(f"{ticker}의 통화 정보를 가져올 수 없습니다.")
+    return currency
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def fetch_total_return_prices(
+    ticker: str,
+    start_date: str,
+    end_date: str,
+    dividend_tax_rate: float = 0.0,
+) -> pd.Series:
+    """배당 재투자가 반영된 total return 시계열 조회 (캐싱)
+
+    Adj Close(분할+배당 조정, 세전 gross total return)를 기준으로 하되,
+    dividend_tax_rate > 0이면 배당 기여분에만 세금을 부과해 net total return을
+    재구성한다.
+
+    배당 기여분 = (Adj Close 일간수익률) − (Close 일간수익률)로 분해된다. 이 차이는
+    배당락일에만 발생하므로, 그만큼을 (1 − 세율)로 줄여 재복리한다.
+    dividend_tax_rate=0이면 Adj Close gross total return과 동일하다.
+
+    Args:
+        ticker: 종목/ETF 심볼
+        start_date: 시작일 (ISO format string for cache key)
+        end_date: 종료일 (ISO format string for cache key)
+        dividend_tax_rate: 배당소득세율 (0.0~1.0). 0이면 세전 gross.
+
+    Returns:
+        total return 가격 Series, tz-naive DatetimeIndex, name='price'
+
+    Raises:
+        ValueError: 데이터를 가져올 수 없는 경우
+    """
+    last_error = None
+
+    for attempt in range(MAX_RETRIES):
+        try:
+            t = yf.Ticker(ticker)
+            hist = t.history(start=start_date, end=end_date, auto_adjust=False)
+
+            if hist.empty:
+                raise ValueError(f"{ticker} 가격 데이터를 찾을 수 없습니다.")
+
+            # 시장별 거래일을 현지 캘린더 날짜로 정렬한다. tz_convert(None)은 UTC
+            # 기준이라 미국/한국 시장이 같은 날 다른 시각으로 찍혀 교집합이 비므로,
+            # 현지 시각을 보존(tz_localize(None))한 뒤 날짜로 정규화한다.
+            index = pd.DatetimeIndex(hist.index)
+            if index.tz is not None:
+                index = index.tz_localize(None)
+            hist.index = index.normalize()
+
+            data = hist[['Close', 'Adj Close']].copy()
+            if data['Adj Close'].isna().all():
+                raise ValueError(f"{ticker} 가격 데이터가 모두 NaN입니다.")
+            data = data.dropna()
+
+            gross = data['Adj Close']
+            if dividend_tax_rate <= 0:
+                result = gross.copy()
+            else:
+                gross_factor = gross / gross.shift(1)
+                price_factor = data['Close'] / data['Close'].shift(1)
+                # 배당 기여분(gross_factor − price_factor)만 (1 − 세율)로 감액
+                net_factor = gross_factor - dividend_tax_rate * (gross_factor - price_factor)
+                net_factor.iloc[0] = 1.0
+                result = gross.iloc[0] * net_factor.cumprod()
+
+            result.name = 'price'
+
+            logger.info(f"{ticker}: {len(result)} 거래일 로드됨 (total return, 배당세 {dividend_tax_rate:.1%})")
+            return result
+
+        except ValueError:
+            raise
+        except Exception as e:
+            last_error = e
+            if attempt < MAX_RETRIES - 1:
+                delay = RETRY_BASE_DELAY * (2 ** attempt)
+                logger.warning(f"{ticker} total return 조회 재시도 ({attempt + 1}/{MAX_RETRIES}): {e}")
+                time.sleep(delay)
+
+    raise ValueError(f"{ticker} 데이터 조회 실패 (재시도 {MAX_RETRIES}회): {last_error}")
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
 def fetch_adjusted_prices(
     tickers: tuple,
     start_date: str,

@@ -109,6 +109,57 @@ class TestCurrencyConverterFallback:
         assert rate == 1300.0
 
 
+class TestMultiCurrencyConversion:
+    """USD 피벗 일반 통화 변환 테스트"""
+
+    def _usd_frame(self, dates, rates):
+        return pd.DataFrame({'rate': rates}, index=pd.DatetimeIndex(dates))
+
+    def test_eur_to_usd_via_pivot(self):
+        """EUR → USD: USD per 1 EUR 환율 직접 사용"""
+        converter = CurrencyConverter(base_currency="USD")
+        converter._date_range = ("2024-01-01", "2024-02-01")
+        converter._usd_per_unit["EUR"] = self._usd_frame(
+            ["2024-01-15", "2024-01-16"], [1.10, 1.12]
+        )
+        rate = converter.get_fx_rate("EUR", pd.Timestamp("2024-01-15"))
+        assert abs(rate - 1.10) < 1e-9
+
+    def test_eur_to_krw_cross(self):
+        """EUR → KRW: (USD/EUR) ÷ (USD/KRW). USD/KRW=1/1300"""
+        converter = CurrencyConverter(base_currency="KRW")
+        converter._date_range = ("2024-01-01", "2024-02-01")
+        converter._usd_per_unit["EUR"] = self._usd_frame(["2024-01-15"], [1.10])
+        converter._usd_per_unit["KRW"] = self._usd_frame(["2024-01-15"], [1.0 / 1300.0])
+        rate = converter.get_fx_rate("EUR", pd.Timestamp("2024-01-15"))
+        assert abs(rate - 1.10 * 1300.0) < 1e-6
+
+    def test_minor_unit_pence(self):
+        """GBp(펜스) → USD: GBP 환율 × 0.01"""
+        converter = CurrencyConverter(base_currency="USD")
+        converter._date_range = ("2024-01-01", "2024-02-01")
+        converter._usd_per_unit["GBP"] = self._usd_frame(["2024-01-15"], [1.27])
+        rate = converter.get_fx_rate("GBp", pd.Timestamp("2024-01-15"))
+        assert abs(rate - 1.27 * 0.01) < 1e-9
+
+    def test_missing_fx_data_raises(self):
+        """환율 프레임이 비면 ValueError"""
+        converter = CurrencyConverter(base_currency="USD")
+        converter._date_range = ("2024-01-01", "2024-02-01")
+        converter._usd_per_unit["EUR"] = pd.DataFrame(columns=['rate'])
+        with pytest.raises(ValueError):
+            converter.get_fx_rate("EUR", pd.Timestamp("2024-01-15"))
+
+    def test_usd_krw_path_unaffected(self):
+        """일반화 후에도 USD↔KRW는 기존 _fx_data 경로 사용"""
+        converter = CurrencyConverter(base_currency="KRW")
+        converter._fx_data = pd.DataFrame(
+            {'rate': [1300.0]}, index=pd.DatetimeIndex(["2024-01-15"])
+        )
+        rate = converter.get_fx_rate("USD", pd.Timestamp("2024-01-15"))
+        assert rate == 1300.0
+
+
 class TestFetchExchangeRate:
     """fetch_exchange_rate 함수 테스트 (mocked)"""
 
