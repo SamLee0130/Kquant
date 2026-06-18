@@ -13,6 +13,7 @@ from src.dashboard.allocation_backtest_page import show_allocation_backtest_page
 from src.dashboard.portfolio_comparison_page import show_portfolio_comparison_page
 from src.dashboard.optimization_page import show_portfolio_optimization_page
 from src.dashboard.index_comparison_page import show_index_comparison_page
+from src.dashboard.korean_comparison_page import show_korean_comparison_page
 from config.settings import STREAMLIT_CONFIG
 
 # 로깅 설정
@@ -37,7 +38,7 @@ def main():
     with st.sidebar:
         page = st.radio(
             "페이지 선택",
-            options=["자산 배분 백테스트", "포트폴리오 비교", "최적 포트폴리오", "지수 / ETF 비교"],
+            options=["자산 배분 백테스트", "포트폴리오 비교", "최적 포트폴리오", "지수 / ETF 비교", "한국 주식 / ETF 비교"],
             index=0
         )
         st.markdown("---")
@@ -51,6 +52,8 @@ def main():
         show_portfolio_optimization_page()
     elif page == "지수 / ETF 비교":
         show_index_comparison_page()
+    elif page == "한국 주식 / ETF 비교":
+        show_korean_comparison_page()
 
 
 if __name__ == "__main__":

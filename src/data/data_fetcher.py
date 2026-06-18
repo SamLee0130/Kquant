@@ -231,6 +231,62 @@ def fetch_total_return_prices(
 
 
 @st.cache_data(ttl=3600, show_spinner=False)
+def fetch_close_prices(
+    ticker: str,
+    start_date: str,
+    end_date: str,
+) -> pd.Series:
+    """종가(Close) 시계열 조회 (캐싱)
+
+    실제 거래 종가(분할만 반영, 배당 미조정)를 반환한다. fetch_price_data와 달리
+    fetch_total_return_prices와 동일하게 현지 캘린더 날짜로 정규화해(tz_localize(None))
+    날짜가 하루 밀리지 않는다.
+
+    Args:
+        ticker: 종목/ETF 심볼
+        start_date: 시작일 (ISO format string for cache key)
+        end_date: 종료일 (ISO format string for cache key)
+
+    Returns:
+        종가 Series, tz-naive DatetimeIndex(자정 정규화), name='price'
+
+    Raises:
+        ValueError: 데이터를 가져올 수 없는 경우
+    """
+    last_error = None
+
+    for attempt in range(MAX_RETRIES):
+        try:
+            t = yf.Ticker(ticker)
+            hist = t.history(start=start_date, end=end_date, auto_adjust=False)
+
+            if hist.empty:
+                raise ValueError(f"{ticker} 가격 데이터를 찾을 수 없습니다.")
+
+            index = pd.DatetimeIndex(hist.index)
+            if index.tz is not None:
+                index = index.tz_localize(None)
+            hist.index = index.normalize()
+
+            close = hist['Close'].dropna()
+            if close.empty:
+                raise ValueError(f"{ticker} 종가 데이터가 모두 NaN입니다.")
+            close.name = 'price'
+            return close
+
+        except ValueError:
+            raise
+        except Exception as e:
+            last_error = e
+            if attempt < MAX_RETRIES - 1:
+                delay = RETRY_BASE_DELAY * (2 ** attempt)
+                logger.warning(f"{ticker} 종가 조회 재시도 ({attempt + 1}/{MAX_RETRIES}): {e}")
+                time.sleep(delay)
+
+    raise ValueError(f"{ticker} 종가 조회 실패 (재시도 {MAX_RETRIES}회): {last_error}")
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
 def fetch_adjusted_prices(
     tickers: tuple,
     start_date: str,
