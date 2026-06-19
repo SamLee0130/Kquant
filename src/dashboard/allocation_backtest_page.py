@@ -452,7 +452,13 @@ def _render_performance_metrics(result: BacktestResult, base_currency: str):
         st.metric(
             "CAGR",
             f"{result.cagr:.2f}%",
-            help="연평균 복리 수익률"
+            help=(
+                "연평균 복리 성장률 (기하평균). "
+                "배당소득세·양도소득세·거래비용·**인출금**을 모두 차감한 최종 잔고 기준입니다. "
+                "투자 성과 자체가 아니라, 인출하며 운용했을 때 남은 잔고가 매년 얼마나 "
+                "성장하는지(인플레이션 방어 가능 여부)를 보기 위한 세후·인출 후 지표입니다. "
+                "따라서 인출률을 높이면 CAGR은 낮아집니다."
+            )
         )
     with row3_col2:
         st.metric(
