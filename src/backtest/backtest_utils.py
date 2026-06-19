@@ -26,7 +26,7 @@ def summarize_tax_events(
     for event in tax_events:
         if isinstance(event, TaxEvent):
             tax_type = event.tax_type
-            amount = event.tax_amount
+            amount = event.reported_tax
         else:
             tax_type = event.get('tax_type')
             amount = event.get('tax_amount', 0.0)
