@@ -285,6 +285,7 @@ class PortfolioBacktester:
                     tax_event = self.tax_calculator.record_capital_gain(gain, date, market=market)
                     # KR_OTHER 즉시 과세: 세금을 현금에서 차감
                     if tax_event:
+                        tax_event.tax_amount_base = tax_event.tax_amount * fx_rate
                         self.cash -= tax_event.tax_amount * fx_rate
 
                 # 현금 업데이트 (base currency 기준)
@@ -377,6 +378,7 @@ class PortfolioBacktester:
                     tax_event = self.tax_calculator.record_capital_gain(gain, date, market=market)
                     # KR_OTHER 즉시 과세
                     if tax_event:
+                        tax_event.tax_amount_base = tax_event.tax_amount * fx_rate
                         self.cash -= tax_event.tax_amount * fx_rate
 
                     sell_amount_base = sell_shares * price * fx_rate
@@ -433,6 +435,7 @@ class PortfolioBacktester:
                 fx_rate = self._get_fx_rate(symbol, div_date)
                 net_dividend_base = net_dividend * fx_rate
                 total_net_dividend_base += net_dividend_base
+                tax_event.tax_amount_base = tax_event.tax_amount * fx_rate
 
                 self.dividend_events.append({
                     'date': div_date,
@@ -474,6 +477,8 @@ class PortfolioBacktester:
         date = pd.Timestamp(year=year, month=1, day=15)  # 1월 중순 가정
         fx_rate = self._get_usd_fx_rate(date)
         tax_base = tax * fx_rate  # base currency 기준 세금
+        # 보고용: 정산 연도(year-1) 양도소득세 이벤트에 base 환산액 기록
+        self.tax_calculator.set_capital_gains_tax_base(year - 1, tax_base)
 
         # 현금에서 우선 차감
         if self.cash >= tax_base:
@@ -634,7 +639,7 @@ class PortfolioBacktester:
             total_withdrawal=cumulative_withdrawal,
             total_dividend_gross=total_dividend_gross,
             total_dividend_net=total_dividend_net,
-            total_tax=self.tax_calculator.get_total_tax(),
+            total_tax=self.tax_calculator.get_total_tax_base(),
             total_transaction_cost=self.total_transaction_cost
         )
 
@@ -756,7 +761,7 @@ class PortfolioBacktester:
             total_value=final_value,
             cumulative_withdrawal=cumulative_withdrawal,
             cumulative_dividend=cumulative_dividend,
-            cumulative_tax=self.tax_calculator.get_total_tax()
+            cumulative_tax=self.tax_calculator.get_total_tax_base()
         ))
 
         # 성과 지표 계산 및 결과 반환
@@ -875,12 +880,12 @@ class PortfolioBacktester:
         for event in result.tax_events:
             event_year = event.date.year
             if event.tax_type == 'dividend':
-                dividend_tax_by_year[event_year] = dividend_tax_by_year.get(event_year, 0.0) + event.tax_amount
+                dividend_tax_by_year[event_year] = dividend_tax_by_year.get(event_year, 0.0) + event.reported_tax
             elif event.tax_type == 'capital_gains':
                 payment_year = event_year + 1  # 다음 연도에 납부
-                capital_tax_payment_by_year[payment_year] = capital_tax_payment_by_year.get(payment_year, 0.0) + event.tax_amount
+                capital_tax_payment_by_year[payment_year] = capital_tax_payment_by_year.get(payment_year, 0.0) + event.reported_tax
             elif event.tax_type == 'kr_capital_gains':
-                kr_capital_tax_by_year[event_year] = kr_capital_tax_by_year.get(event_year, 0.0) + event.tax_amount
+                kr_capital_tax_by_year[event_year] = kr_capital_tax_by_year.get(event_year, 0.0) + event.reported_tax
 
         annual_data = []
         years = sorted(history_df['year'].unique())

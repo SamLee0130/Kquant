@@ -21,9 +21,19 @@ class TaxEvent:
     """세금 이벤트 기록"""
     date: pd.Timestamp
     tax_type: str  # 'dividend', 'capital_gains', 'kr_capital_gains'
-    gross_amount: float  # 세전 금액
-    tax_amount: float  # 세금 금액
-    net_amount: float  # 세후 금액
+    gross_amount: float  # 세전 금액 (native currency)
+    tax_amount: float  # 세금 금액 (native currency)
+    net_amount: float  # 세후 금액 (native currency)
+    tax_amount_base: Optional[float] = None  # base currency 환산 세금 (백테스터가 설정)
+
+    @property
+    def reported_tax(self) -> float:
+        """보고용 세금 (base 환산값이 있으면 그것, 없으면 native)
+
+        통화 변환기가 없는 단일 통화(USD) 백테스트에서는 base 설정이 생략되거나
+        native와 동일하므로 native로 폴백한다.
+        """
+        return self.tax_amount_base if self.tax_amount_base is not None else self.tax_amount
 
 
 class TaxCalculator:
@@ -197,6 +207,16 @@ class TaxCalculator:
         
         return tax_amount
     
+    def set_capital_gains_tax_base(self, settle_year: int, base_amount: float) -> None:
+        """해당 연도 US 양도소득세 이벤트에 base 통화 환산액 기록 (이연 납부 시점)"""
+        for event in self.tax_history:
+            if event.tax_type == 'capital_gains' and event.date.year == settle_year:
+                event.tax_amount_base = base_amount
+
+    def get_total_tax_base(self) -> float:
+        """총 세금 조회 (base currency 환산). 미설정 이벤트는 native로 폴백."""
+        return sum(event.reported_tax for event in self.tax_history)
+
     def get_deferred_tax(self, year: int) -> float:
         """이연된 양도소득세 조회
         
