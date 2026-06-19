@@ -182,6 +182,8 @@ class PortfolioBacktester:
             return pd.Series(dtype=float)
         
         dividends = self._dividend_data[symbol]
+        if dividends.empty:
+            return pd.Series(dtype=float)
         # 혹시 남아 있을지 모르는 tz 정보 제거
         if hasattr(dividends.index, "tz") and dividends.index.tz is not None:
             dividends.index = dividends.index.tz_convert(None)

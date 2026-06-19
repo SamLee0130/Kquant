@@ -106,7 +106,9 @@ def fetch_dividend_data(
             dividends = t.dividends
 
             if dividends.empty:
-                return pd.Series(dtype=float)
+                # 배당이 없는 종목(예: GLD)도 빈 DatetimeIndex로 반환해야
+                # 이후 날짜 비교가 깨지지 않는다.
+                return pd.Series(dtype=float, index=pd.DatetimeIndex([]))
 
             dividends.index = pd.DatetimeIndex(dividends.index)
             dividends.index = _normalize_timezone(dividends.index)
