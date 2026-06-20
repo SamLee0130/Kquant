@@ -377,7 +377,10 @@ def _display_backtest_section(weights: dict, settings):
                     kr_capital_gains_rate=settings.kr_capital_gains_rate
                 )
 
-                result = backtester.run(years=settings.backtest_years)
+                result = backtester.run(
+                    start_date=settings.start_date,
+                    end_date=settings.end_date
+                )
 
             # 결과 표시
             _display_backtest_results(result, backtester, settings.base_currency)
