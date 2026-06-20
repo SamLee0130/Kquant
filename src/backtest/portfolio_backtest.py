@@ -15,7 +15,7 @@ import logging
 from .tax_calculator import TaxCalculator
 from config.settings import BACKTEST_CONSTANTS
 from src.data.data_fetcher import fetch_price_data, fetch_dividend_data
-from src.data.etf_classifier import ETFInfo, Market, has_mixed_currencies
+from src.data.etf_classifier import ETFInfo, Market, needs_currency_conversion
 from src.data.fx_fetcher import CurrencyConverter
 
 logger = logging.getLogger(__name__)
@@ -152,9 +152,14 @@ class PortfolioBacktester:
 
             logger.info(f"{symbol}: {len(self._price_data[symbol])} 거래일, {len(self._dividend_data[symbol])} 배당 이벤트")
 
-        # 혼합 통화 포트폴리오인 경우 환율 데이터도 조회
-        if self.currency_converter and self.etf_info and has_mixed_currencies(self.etf_info):
-            logger.info("혼합 통화 포트폴리오 감지 → 환율 데이터 조회 중...")
+        # base 통화와 다른 통화의 종목이 하나라도 있으면 환율 데이터 조회.
+        # (예: base=KRW + 전 종목 USD도 변환 필요 — 종목 간 통화가 같아도)
+        if (
+            self.currency_converter
+            and self.etf_info
+            and needs_currency_conversion(self.etf_info, self.currency_converter.base_currency)
+        ):
+            logger.info("통화 변환 필요 → 환율 데이터 조회 중...")
             self.currency_converter.fetch_fx_data(start_str, end_str)
     
     def _get_price(self, symbol: str, date: pd.Timestamp) -> Optional[float]:
