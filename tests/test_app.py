@@ -68,6 +68,38 @@ class TestPortfolioComparisonPage:
         assert at.sidebar.radio[0].value == "포트폴리오 비교"
 
 
+class TestCustomDateRange:
+    """시작일/종료일 직접 선택 토글 테스트"""
+
+    def test_date_inputs_present(self):
+        """사이드바에 시작일/종료일 date_input이 존재하는지 확인"""
+        at = AppTest.from_file("app.py")
+        at.run(timeout=30)
+
+        labels = [d.label for d in at.sidebar.date_input]
+        assert "시작일" in labels and "종료일" in labels, \
+            f"Expected 시작일/종료일 date inputs, got: {labels}"
+
+    def test_toggle_custom_dates_no_exception(self):
+        """직접 선택 체크박스 토글 시 위젯 교체로 예외가 없는지 확인"""
+        at = AppTest.from_file("app.py")
+        at.run(timeout=30)
+
+        custom_checkbox = next(
+            cb for cb in at.sidebar.checkbox if cb.label == "시작일/종료일 직접 선택"
+        )
+        custom_checkbox.set_value(True)
+        at.run(timeout=30)
+        assert not at.exception, f"Enabling custom dates raised: {at.exception}"
+
+        # 직접 선택 모드에서 날짜 변경
+        start_input = next(d for d in at.sidebar.date_input if d.label == "시작일")
+        from datetime import date
+        start_input.set_value(date(2021, 6, 1))
+        at.run(timeout=30)
+        assert not at.exception, f"Changing start date raised: {at.exception}"
+
+
 class TestAppIntegrity:
     """앱 무결성 테스트"""
 

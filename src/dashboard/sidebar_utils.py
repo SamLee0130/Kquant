@@ -6,7 +6,10 @@
 """
 import streamlit as st
 from dataclasses import dataclass
+from datetime import date
+
 from config.settings import ETF_BACKTEST_DEFAULTS, KOREAN_TAX_DEFAULTS, CURRENCY_DEFAULTS
+from src.backtest.portfolio_backtest import resolve_backtest_period
 
 
 @dataclass
@@ -15,6 +18,8 @@ class BacktestSettings:
     initial_capital: float
     base_currency: str
     backtest_years: int
+    start_date: date
+    end_date: date
     rebalance_freq: str
     withdrawal_rate: float
     dividend_tax_rate: float
@@ -72,6 +77,42 @@ def render_common_sidebar(key_prefix: str = "") -> BacktestSettings:
         key=f"{key_prefix}backtest_years" if key_prefix else None,
         help="최근 N년 동안의 백테스트 수행"
     )
+
+    # 기간(년)으로 계산한 기본 시작/종료일 (종료일은 현재 분기 시작일로 스냅)
+    default_start, default_end = resolve_backtest_period(years=backtest_years)
+
+    use_custom_dates = st.checkbox(
+        "시작일/종료일 직접 선택",
+        value=False,
+        key=f"{key_prefix}use_custom_dates",
+        help="체크하면 기간(년) 대신 날짜를 직접 지정합니다."
+    )
+
+    col_start, col_end = st.columns(2)
+    with col_start:
+        picked_start = st.date_input(
+            "시작일",
+            value=default_start,
+            disabled=not use_custom_dates,
+            key=f"{key_prefix}start_date" if use_custom_dates else None,
+        )
+    with col_end:
+        picked_end = st.date_input(
+            "종료일",
+            value=default_end,
+            disabled=not use_custom_dates,
+            key=f"{key_prefix}end_date" if use_custom_dates else None,
+        )
+
+    # 직접 선택 모드면 사용자가 고른 날짜, 아니면 기간(년)으로 계산한 날짜 사용
+    if use_custom_dates:
+        start_date, end_date = picked_start, picked_end
+    else:
+        start_date, end_date = default_start, default_end
+
+    if start_date >= end_date:
+        st.error("종료일은 시작일보다 이후여야 합니다.")
+        st.stop()
 
     # 리밸런싱 주기
     rebalance_freq = st.selectbox(
@@ -162,6 +203,8 @@ def render_common_sidebar(key_prefix: str = "") -> BacktestSettings:
         initial_capital=initial_capital,
         base_currency=base_currency,
         backtest_years=backtest_years,
+        start_date=start_date,
+        end_date=end_date,
         rebalance_freq=rebalance_freq,
         withdrawal_rate=withdrawal_rate,
         dividend_tax_rate=dividend_tax_rate,

@@ -198,7 +198,6 @@ def show_allocation_backtest_page():
 
     # 설정값 추출
     initial_capital = settings.initial_capital
-    backtest_years = settings.backtest_years
     rebalance_freq = settings.rebalance_freq
     withdrawal_rate = settings.withdrawal_rate
     dividend_tax_rate = settings.dividend_tax_rate
@@ -346,7 +345,10 @@ def show_allocation_backtest_page():
                     kr_capital_gains_rate=settings.kr_capital_gains_rate
                 )
                 
-                result = backtester.run(years=backtest_years)
+                result = backtester.run(
+                    start_date=settings.start_date,
+                    end_date=settings.end_date
+                )
                 
                 # 결과 저장
                 st.session_state.backtest_result = result

@@ -20,6 +20,31 @@ from src.data.fx_fetcher import CurrencyConverter
 
 logger = logging.getLogger(__name__)
 
+
+def resolve_backtest_period(
+    start_date: Optional[datetime] = None,
+    end_date: Optional[datetime] = None,
+    years: int = 10,
+) -> tuple[datetime, datetime]:
+    """백테스트 시작/종료일 기본값 계산 (tz 정규화 전).
+
+    - 종료일 미지정: 현재 분기 시작일로 스냅 (리밸런싱 경계 정렬)
+    - 시작일 미지정: 종료일 연도 - years 의 1월 1일
+
+    사이드바와 _setup_dates 가 동일한 규칙을 쓰도록 단일 출처로 둔다.
+    """
+    now = datetime.now()
+
+    if end_date is None:
+        current_quarter_month = ((now.month - 1) // 3) * 3 + 1
+        end_date = datetime(now.year, current_quarter_month, 1)
+
+    if start_date is None:
+        start_date = datetime(end_date.year - years, 1, 1)
+
+    return start_date, end_date
+
+
 # 상수 로드
 SNAPSHOT_THRESHOLD_DAY = BACKTEST_CONSTANTS["snapshot_threshold_day"]
 RISK_FREE_RATE = BACKTEST_CONSTANTS["risk_free_rate"]
@@ -525,15 +550,7 @@ class PortfolioBacktester:
         Returns:
             (start_date, end_date) as tz-naive Timestamps
         """
-        now = datetime.now()
-
-        if end_date is None:
-            current_quarter_month = ((now.month - 1) // 3) * 3 + 1
-            end_date = datetime(now.year, current_quarter_month, 1)
-
-        if start_date is None:
-            start_year = end_date.year - years
-            start_date = datetime(start_year, 1, 1)
+        start_date, end_date = resolve_backtest_period(start_date, end_date, years)
 
         # 타임존 혼합 방지: tz-naive로 통일
         start_ts = pd.Timestamp(start_date)

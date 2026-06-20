@@ -6,7 +6,6 @@
 import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
-from datetime import datetime, timedelta
 from typing import List, Dict, Optional
 import logging
 
@@ -48,7 +47,6 @@ def show_portfolio_comparison_page():
 
     # 설정값 추출
     initial_capital = settings.initial_capital
-    backtest_years = settings.backtest_years
     rebalance_freq = settings.rebalance_freq
     withdrawal_rate = settings.withdrawal_rate
     dividend_tax_rate = settings.dividend_tax_rate
@@ -158,11 +156,6 @@ def show_portfolio_comparison_page():
             return
         
         with st.spinner("백테스트 실행 중..."):
-            # 백테스트 기간 계산: 종료일 기준 과거 N년의 1월 1일로 고정
-            end_date = datetime.now()
-            start_year = end_date.year - backtest_years
-            start_date = datetime(start_year, 1, 1)
-            
             # 공통 설정
             common_params = {
                 'initial_capital': initial_capital,
@@ -187,34 +180,40 @@ def show_portfolio_comparison_page():
                     **common_params
                 )
 
+            def _run(backtester):
+                return backtester.run(
+                    start_date=settings.start_date,
+                    end_date=settings.end_date
+                )
+
             # 포트폴리오 1 백테스트
             backtester_1 = _create_backtester(allocation_1)
-            result_1 = backtester_1.run(start_date, end_date)
+            result_1 = _run(backtester_1)
 
             # 포트폴리오 2 백테스트
             backtester_2 = _create_backtester(allocation_2)
-            result_2 = backtester_2.run(start_date, end_date)
+            result_2 = _run(backtester_2)
 
             # 포트폴리오 3 백테스트 (활성화된 경우)
             backtester_3 = None
             result_3 = None
             if enable_portfolio_3:
                 backtester_3 = _create_backtester(allocation_3)
-                result_3 = backtester_3.run(start_date, end_date)
+                result_3 = _run(backtester_3)
 
             # 포트폴리오 4 백테스트 (활성화된 경우)
             backtester_4 = None
             result_4 = None
             if enable_portfolio_4:
                 backtester_4 = _create_backtester(allocation_4)
-                result_4 = backtester_4.run(start_date, end_date)
+                result_4 = _run(backtester_4)
 
             # 포트폴리오 5 백테스트 (활성화된 경우)
             backtester_5 = None
             result_5 = None
             if enable_portfolio_5:
                 backtester_5 = _create_backtester(allocation_5)
-                result_5 = backtester_5.run(start_date, end_date)
+                result_5 = _run(backtester_5)
         
         st.success("비교 완료!")
 
